@@ -2,6 +2,7 @@
 // 🏫 메인 내비게이션, 단원 테스트 및 5단계 수업 흐름
 // ==========================================
 async function initApp() {
+    await loadCloudApiKey();
     updateApiBtnBadge();
     updateCloudBadge(Boolean(db));
     if (typeof MATH_DB === 'undefined') {
@@ -29,6 +30,7 @@ async function initApp() {
         }
   
         updateUserBadge();
+        updateApiBtnBadge();
         routeAfterLogin();
         return;
       }
@@ -370,7 +372,7 @@ async function initApp() {
     updateLessonHeader("1단계: 개념 영상");
     const cleanUrl = getCleanYoutubeEmbedUrl(state.lessonData.videoUrl);
     const mediaHTML = cleanUrl
-      ? `<div class="video-box"><div class="yt-shield-top"></div><div class="yt-shield-bottom"></div><iframe src="${cleanUrl}" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="video-notice">💡 영상 가운데를 눌러 재생하세요! (오류 153이 뜨면 Cursor에서 마우스 우클릭 ➔ Open with Live Server로 열어주세요)</div>`
+      ? `<div class="video-box"><div class="yt-shield-top"></div><div class="yt-shield-bottom"></div><iframe src="${cleanUrl}" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="video-notice">💡 영상 가운데를 눌러 재생하세요!</div>`
       : `<div class="summary-card">${state.lessonData.summaryCard}</div>`;
     const btnText = cleanUrl ? "영상을 끝까지 다 봤어요! (개념 퀴즈 풀기) 👉" : "핵심 약속 3가지를 다 읽었어요! (종합 퀴즈 풀기) 👉";
     document.getElementById('app-content').innerHTML = `

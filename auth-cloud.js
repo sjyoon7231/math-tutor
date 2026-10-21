@@ -169,6 +169,7 @@ const firebaseConfig = {
     document.getElementById('score-board').innerText = "☁️ 클라우드 학습방 연동";
     setBreadcrumb("학생 로그인 및 학년 설정");
     updateUserBadge();
+    updateApiBtnBadge();
   
     const isLogin = (state.authMode === 'login');
     const titleText = isLogin ? "🔑 기존 학생 로그인하기" : "✨ 새 학생 회원가입";
@@ -336,6 +337,7 @@ const firebaseConfig = {
     }));
   
     updateUserBadge();
+    updateApiBtnBadge();
   
     if (state.isAllAccess) {
       alert(`🌟 [${name}님 - 선행·전체 열람 및 교사 현황판 모드]\n전체 학년 메뉴와 클라우드 전체 학생 학습 현황판이 열립니다!`);
@@ -371,6 +373,7 @@ const firebaseConfig = {
     state.cloudRecords = {};
     localStorage.removeItem('MATH_CURRENT_SESSION');
     updateUserBadge();
+    updateApiBtnBadge();
     showAuthScreen('login');
   }
   
@@ -396,14 +399,52 @@ const firebaseConfig = {
     }
   }
   
+  // ==========================================
+  // 🔑 3. 클라우드 연동 API 키 관리 (학생 기기 자동 배포)
+  // ==========================================
+  let cloudApiKey = '';
+  
   function getSavedApiKey() {
-    return (localStorage.getItem('GEMINI_API_KEY') || '').trim();
+    return (cloudApiKey || localStorage.getItem('GEMINI_API_KEY') || '').trim();
+  }
+  
+  async function loadCloudApiKey() {
+    if (!db) return;
+    try {
+      const doc = await db.collection('settings').doc('gemini').get();
+      if (doc.exists && doc.data().apiKey) {
+        cloudApiKey = doc.data().apiKey.trim();
+        localStorage.setItem('GEMINI_API_KEY', cloudApiKey);
+      } else {
+        const localKey = (localStorage.getItem('GEMINI_API_KEY') || '').trim();
+        if (localKey) {
+          cloudApiKey = localKey;
+          await db.collection('settings').doc('gemini').set({
+            apiKey: localKey,
+            updatedAt: new Date().toLocaleString()
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("클라우드 API 키 불러오기 실패:", e);
+    }
+    updateApiBtnBadge();
   }
   
   function updateApiBtnBadge() {
     const btn = document.getElementById('api-key-btn');
-    if (getSavedApiKey()) {
-      btn.innerText = "⚙️ API 키 연결됨 ✅";
+    if (!btn) return;
+    const hasKey = Boolean(getSavedApiKey());
+  
+    // 키가 이미 연결되어 있고 일반 학생 모드라면 설정 버튼을 숨겨서 학생이 건드리지 못하게 보호
+    if (hasKey && state.studentName && !state.isAllAccess) {
+      btn.style.display = 'none';
+      return;
+    }
+  
+    btn.style.display = 'inline-block';
+    if (hasKey) {
+      btn.innerText = "⚙️ AI 키 자동연결됨 ✅";
       btn.style.background = "#0f766e";
     } else {
       btn.innerText = "⚙️ API 키 설정 필요";
@@ -420,14 +461,31 @@ const firebaseConfig = {
     document.getElementById('api-modal').style.display = 'none';
   }
   
-  function saveApiKey() {
+  async function saveApiKey() {
     const key = document.getElementById('api-key-input').value.trim();
     if (!key) {
+      cloudApiKey = '';
       localStorage.removeItem('GEMINI_API_KEY');
+      if (db) {
+        try { await db.collection('settings').doc('gemini').delete(); } catch (e) {}
+      }
       alert('API 키가 삭제되었습니다.');
     } else {
+      cloudApiKey = key;
       localStorage.setItem('GEMINI_API_KEY', key);
-      alert('✅ 제미나이 API 키가 저장되었습니다!');
+      if (db) {
+        try {
+          await db.collection('settings').doc('gemini').set({
+            apiKey: key,
+            updatedAt: new Date().toLocaleString()
+          });
+          alert('✅ 제미나이 API 키가 클라우드에 저장되었습니다!\n이제 모든 학생의 스마트폰과 태블릿에서 키 입력 없이 AI 선생님이 바로 작동합니다!');
+        } catch (e) {
+          alert('✅ 기기에 API 키가 저장되었습니다!');
+        }
+      } else {
+        alert('✅ 제미나이 API 키가 저장되었습니다!');
+      }
     }
     updateApiBtnBadge();
     closeApiModal();
