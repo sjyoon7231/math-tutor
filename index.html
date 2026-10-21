@@ -62,8 +62,9 @@
 
     .video-box { position: relative; width: 100%; max-width: 340px; margin: 0 auto 24px; aspect-ratio: 9 / 16; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: #000; }
     .video-box iframe { width: 100%; height: 100%; border: none; }
-    .yt-shield-top { position: absolute; top: 0; left: 0; width: 100%; height: 70px; z-index: 10; background: transparent; }
-    .yt-shield-bottom { position: absolute; bottom: 0; right: 0; width: 140px; height: 50px; z-index: 10; background: transparent; }
+    .yt-shield-top { position: absolute; top: 0; left: 0; width: 100%; height: 65px; z-index: 10; background: transparent; }
+    /* 자막(CC) 버튼과 톱니바퀴 버튼을 누를 수 있도록 우측 하단 가림막 폭을 55px로 축소 */
+    .yt-shield-bottom { position: absolute; bottom: 0; right: 0; width: 55px; height: 45px; z-index: 10; background: transparent; }
     .video-notice { text-align: center; font-size: 13px; color: #64748b; margin-top: -16px; margin-bottom: 20px; }
 
     .summary-card { background: #1e293b; color: #f8fafc; padding: 24px; border-radius: 16px; font-size: 18px; line-height: 1.8; white-space: pre-line; margin-bottom: 24px; }
@@ -178,12 +179,12 @@
   </div>
 </div>
 
-<!-- Firebase 공식 SDK 및 모듈화된 4개 파일 순서대로 불러오기 -->
+<!-- Firebase 공식 SDK 및 모듈화된 4개 파일 순서대로 불러오기 (버전 v=6 갱신) -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-<script src="data.js?v=5"></script>
-<script src="auth-cloud.js?v=5"></script>
-<script src="tutor-helper.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="data.js?v=6"></script>
+<script src="auth-cloud.js?v=6"></script>
+<script src="tutor-helper.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

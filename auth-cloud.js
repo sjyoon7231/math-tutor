@@ -68,11 +68,12 @@ const firebaseConfig = {
     }
   }
   
+  // 유튜브 자동 자막 끄기(cc_load_policy=0) 및 알림 끄기(iv_load_policy=3) 적용
   function getCleanYoutubeEmbedUrl(rawUrl) {
     if (!rawUrl) return '';
     const match = rawUrl.match(/(?:embed\/|watch\?v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
     if (match && match[1]) {
-      return `https://www.youtube.com/embed/${match[1]}?rel=0&playsinline=1`;
+      return `https://www.youtube.com/embed/${match[1]}?rel=0&playsinline=1&cc_load_policy=0&iv_load_policy=3`;
     }
     return rawUrl;
   }
@@ -436,7 +437,6 @@ const firebaseConfig = {
     if (!btn) return;
     const hasKey = Boolean(getSavedApiKey());
   
-    // 키가 이미 연결되어 있고 일반 학생 모드라면 설정 버튼을 숨겨서 학생이 건드리지 못하게 보호
     if (hasKey && state.studentName && !state.isAllAccess) {
       btn.style.display = 'none';
       return;
