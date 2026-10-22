@@ -1,7 +1,152 @@
 // ==========================================
-// 🏫 메인 내비게이션, 단원 테스트 및 5단계 수업 흐름
+// ⏱️ 1. 단계별 소요 시간 측정 및 정밀 오답 분석 도구
 // ==========================================
-async function initApp() {
+function resetLessonTimer() {
+    state.lessonStartTime = Date.now();
+    state.currentStepKey = null;
+    state.currentStepStartTime = null;
+    state.stepTimes = {
+      warmup: 0,
+      step1: 0,
+      step2: 0,
+      step3: 0,
+      step4: 0,
+      step5: 0
+    };
+  }
+  
+  function switchStepTimer(newKey) {
+    const now = Date.now();
+    if (state.currentStepKey && state.currentStepStartTime) {
+      const elapsedSec = Math.max(1, Math.round((now - state.currentStepStartTime) / 1000));
+      state.stepTimes[state.currentStepKey] = (state.stepTimes[state.currentStepKey] || 0) + elapsedSec;
+    }
+    state.currentStepKey = newKey;
+    state.currentStepStartTime = newKey ? now : null;
+  }
+  
+  function formatDuration(sec) {
+    const s = Math.max(0, Math.round(sec || 0));
+    if (s === 0) return "0초 (해당 없음)";
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    if (m === 0) return `${rem}초`;
+    return `${m}분 ${rem}초`;
+  }
+  
+  // 학생이 적은 분수 오답과 실제 정답을 비교하여 왜 틀렸는지 구체적인 원인을 진단하는 함수
+  function diagnoseFractionError(item, wVal, nVal, dVal, status) {
+    const w = parseInt(wVal || "0", 10);
+    const n = parseInt(nVal, 10);
+    const d = parseInt(dVal, 10);
+    const targetN = item.num;
+    const targetD = item.den;
+    const studentTotalN = w * d + n;
+  
+    if (status === 'unreduced') {
+      return `계산 과정과 원리는 정확하게 이해했지만, 마지막에 분자(${studentTotalN})와 분모(${d})를 공약수로 나누어 '기약분수(${targetN}/${targetD})'로 약분하지 않아 아쉽게 틀렸습니다.`;
+    }
+  
+    // 1. 분자와 분모를 위아래 반대로 적은 경우 (예: 7/9 대신 9/7, 5/2 대신 2/5)
+    if (studentTotalN === targetD && d === targetN) {
+      if (item.q.includes('유형 3') || item.q.includes('똑같이 나누어') || item.q.includes('한 ')) {
+        return `문장제 문제에서 '전체 양(나누어지는 수)'과 '나누는 수'의 순서를 반대로 세웠습니다. 전체 양(${targetN})을 나누는 수(${targetD})로 나누어 분자에 ${targetN}, 분모에 ${targetD}를 적어야 하는데 위아래를 거꾸로(${studentTotalN}/${d}) 적었습니다.`;
+      }
+      return `나눗셈을 분수로 바꿀 때 분자(위)와 분모(아래)의 위치가 반대로 뒤바뀌었습니다! 나눗셈 기호(÷) 앞의 수가 분자(${targetN})로, 뒤의 수가 분모(${targetD})로 가야 하는데 위아래를 거꾸로(${studentTotalN}/${d}) 적었습니다.`;
+    }
+  
+    // 2. 대분수를 가분수로 바꾸지 않고 자연수나 분자만 계산한 경우
+    const mixedMatch = item.q.match(/(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
+    if (mixedMatch) {
+      const mw = parseInt(mixedMatch[1], 10);
+      const mn = parseInt(mixedMatch[2], 10);
+      const md = parseInt(mixedMatch[3], 10);
+      const mc = parseInt(mixedMatch[4], 10);
+      const impN = mw * md + mn;
+      if (n === mn && d === md * mc) {
+        return `대분수(${mw}과 ${mn}/${md})를 가분수(${impN}/${md})로 먼저 고치지 않고, 앞의 자연수 ${mw}을 빠뜨린 채 진분수 부분만 계산했습니다.`;
+      }
+      return `대분수(${mw}과 ${mn}/${md})를 가분수(${impN}/${md})로 고치거나 분모에 나누는 수(${mc})를 곱하는 과정에서 계산 실수가 있었습니다.`;
+    }
+  
+    // 3. 나누는 수를 분모가 아닌 분자에 곱한 경우
+    const fracMatch = item.q.match(/(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
+    if (fracMatch) {
+      const fn = parseInt(fracMatch[1], 10);
+      const fd = parseInt(fracMatch[2], 10);
+      const fc = parseInt(fracMatch[3], 10);
+      if (studentTotalN === fn * fc && d === fd) {
+        return `(÷ ${fc})는 (× 1/${fc})이므로 나누는 수 ${fc}를 '분모(${fd})'에 곱해야 하는데, 실수로 '분자(${fn})'에 곱하여 ${studentTotalN}/${d}라고 적었습니다.`;
+      }
+      if (d === fd && studentTotalN !== targetN) {
+        return `분모(${fd})는 맞았지만 분자 나눗셈이나 곱셈 계산 과정에서 작은 계산 실수가 있었습니다.`;
+      }
+    }
+  
+    return `나눗셈 식을 세우거나 분수로 바꾸는 과정에서 분자(${targetN}) 또는 분모(${targetD}) 계산에 착오가 있었습니다.`;
+  }
+  
+  // 문제 텍스트와 힌트를 조합하여 3단계 상세 정석 해설을 생성하는 함수
+  function buildDetailedExplanation(item) {
+    const mixedMatch = item.q.match(/(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
+    if (mixedMatch) {
+      const w = parseInt(mixedMatch[1], 10);
+      const n = parseInt(mixedMatch[2], 10);
+      const d = parseInt(mixedMatch[3], 10);
+      const c = parseInt(mixedMatch[4], 10);
+      const impN = w * d + n;
+      return [
+        `① [가분수로 바꾸기] 대분수 ${w}과 ${n}/${d}을 가분수로 고치면 분자는 (${w}×${d}+${n}) = ${impN}이므로 ${impN}/${d}이 됩니다.`,
+        `② [곱셈으로 바꾸어 계산] ${impN}/${d} ÷ ${c} = ${impN}/${d} × 1/${c} = ${impN}/${d * c} 입니다.`,
+        `③ [기약분수 정답] 약분하여 정리하면 최종 정답은 ${item.num}/${item.den} 입니다.`
+      ].join('<br>');
+    }
+  
+    const fracMatch = item.q.match(/(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
+    if (fracMatch) {
+      const n = parseInt(fracMatch[1], 10);
+      const d = parseInt(fracMatch[2], 10);
+      const c = parseInt(fracMatch[3], 10);
+      if (n % c === 0 && d === item.den) {
+        return [
+          `① [원리 확인] 분자(${n})가 자연수(${c})로 나누어떨어질 때는 분모(${d})를 그대로 두고 분자끼리만 나눕니다.`,
+          `② [계산 과정] ${n}/${d} ÷ ${c} = (${n} ÷ ${c})/${d} = ${n / c}/${d}`,
+          `③ [최종 정답] 따라서 바른 몫은 ${item.num}/${item.den} 입니다.`
+        ].join('<br>');
+      }
+      return [
+        `① [곱셈으로 바꾸기] 나누기 자연수(÷ ${c})는 분수의 곱셈(× 1/${c})으로 바꾸어 분모에 ${c}를 곱합니다.`,
+        `② [계산 과정] ${n}/${d} ÷ ${c} = ${n}/${d} × 1/${c} = ${n}/(${d} × ${c}) = ${n}/${d * c}`,
+        `③ [기약분수 정답] 기약분수로 나타내면 최종 정답은 ${item.num}/${item.den} 입니다.`
+      ].join('<br>');
+    }
+  
+    const natMatch = item.q.match(/(\d+)\s*÷\s*(\d+)/);
+    if (natMatch) {
+      const a = parseInt(natMatch[1], 10);
+      const b = parseInt(natMatch[2], 10);
+      return [
+        `① [핵심 원리] (자연수) ÷ (자연수)의 몫은 나누어지는 수(÷ 앞의 수)가 분자(위), 나누는 수(÷ 뒤의 수)가 분모(아래)가 됩니다.`,
+        `② [식 적용하기] ${a} ÷ ${b} 에서 앞의 수 ${a}를 분자에, 뒤의 수 ${b}를 분모에 적으면 ${a}/${b}가 됩니다.`,
+        `③ [최종 정답] 기약분수로 나타낸 정답은 ${item.num}/${item.den} 입니다.`
+      ].join('<br>');
+    }
+  
+    return [
+      `① [문제 이해] ${item.h1}`,
+      `② [식 세우기 및 계산] ${item.h2}`,
+      `③ [최종 정답] 따라서 구하는 정답은 ${item.num}/${item.den} 입니다.`
+    ].join('<br>');
+  }
+  
+  function summarizeQuestionText(rawQ) {
+    return rawQ.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  
+  // ==========================================
+  // 🏫 2. 메인 내비게이션 및 단원 테스트
+  // ==========================================
+  async function initApp() {
     await loadCloudApiKey();
     updateApiBtnBadge();
     updateCloudBadge(Boolean(db));
@@ -145,6 +290,7 @@ async function initApp() {
   }
   
   function showLessonSelect(gradeId, semId, unitId) {
+    switchStepTimer(null);
     state.grade = gradeId;
     state.semester = semId;
     state.unit = unitId;
@@ -165,9 +311,10 @@ async function initApp() {
       let badgeHTML = `<span class="menu-arrow">수업 시작 👉</span>`;
       if (rec) {
         completedCount++;
+        const timeTag = rec.totalTime ? ` | ⏱️${rec.totalTime}` : '';
         badgeHTML = rec.status === "완료"
-          ? `<span class="complete-badge">✅ 학습 완료 (첫평가 ${rec.score}점)</span>`
-          : `<span class="review-badge">⚠️ 보충 필요 (첫평가 ${rec.score}점)</span>`;
+          ? `<span class="complete-badge">✅ 학습 완료 (첫평가 ${rec.score}점${timeTag})</span>`
+          : `<span class="review-badge">⚠️ 보충 필요 (첫평가 ${rec.score}점${timeTag})</span>`;
       }
       return `<button class="menu-item" onclick="startLesson('${code}')"><div><div class="menu-title">✏️ ${les.title}</div><div class="menu-desc">${les.goal}</div></div><div class="menu-right">${badgeHTML}</div></button>`;
     }).join('');
@@ -182,7 +329,7 @@ async function initApp() {
   
     document.getElementById('app-content').innerHTML = `
       <h2>${unitObj.unitTitle} (${state.studentName} 학생의 클라우드 학습방)</h2>
-      <div class="goal-box">오늘 공부할 차시를 골라 클릭해 주세요. 완료 도장은 클라우드에 실시간으로 자동 저장됩니다!</div>
+      <div class="goal-box">오늘 공부할 차시를 골라 클릭해 주세요. 완료 도장과 소요 시간은 클라우드에 실시간으로 자동 저장됩니다!</div>
       <div class="menu-list">${itemsHTML}</div>
       ${examBannerHTML}
       <div class="demo-bar">
@@ -198,7 +345,7 @@ async function initApp() {
     state.examQuestions = ["1-1", "1-2", "1-3", "1-4", "1-5"].map((code, idx) => {
       const les = unitObj.items[code];
       const chosen = pick(les.step3A[idx % 3]);
-      return { lessonCode: code, lessonTitle: les.title, q: chosen.q, num: chosen.num, den: chosen.den, sol: chosen.h2 };
+      return { lessonCode: code, lessonTitle: les.title, q: chosen.q, num: chosen.num, den: chosen.den, h1: chosen.h1, h2: chosen.h2 };
     });
     state.examIdx = 0;
     state.examScore = 0;
@@ -245,7 +392,9 @@ async function initApp() {
       state.examScore += 20;
     } else {
       const myAnsStr = (wVal ? `${wVal}과 ` : '') + `${nVal}/${dVal}` + (status === 'unreduced' ? ' (약분 안 함)' : '');
-      state.examWrongList.push({ qNum: state.examIdx + 1, lessonCode: item.lessonCode, q: item.q, myAns: myAnsStr, correctAns: `${item.num}/${item.den}`, sol: item.sol });
+      const diag = diagnoseFractionError(item, wVal, nVal, dVal, status);
+      const fullSol = buildDetailedExplanation(item);
+      state.examWrongList.push({ qNum: state.examIdx + 1, lessonCode: item.lessonCode, q: item.q, myAns: myAnsStr, correctAns: `${item.num}/${item.den}`, diag, sol: fullSol });
     }
     state.examIdx++;
     if (state.examIdx < state.examQuestions.length) showUnitExamQuestion();
@@ -267,7 +416,16 @@ async function initApp() {
   
     const wrongNotesHTML = state.examWrongList.length === 0
       ? `<div class="goal-box">🎉 완벽합니다, ${state.studentName} 학생! 5문제를 모두 맞혀 1단원 분수의 나눗셈을 마스터했습니다!</div>`
-      : `<h3>📓 ${state.studentName} 학생의 오답 노트</h3>` + state.examWrongList.map(w => `<div class="wrong-note-card"><strong>❌ [${w.qNum}번 오답 노트] (${w.lessonCode}차시)</strong><br>• <strong>문제:</strong> ${w.q.replace(/\n/g, ' ')}<br>• <strong>내 답:</strong> <span style="color:#dc2626; font-weight:bold;">${w.myAns}</span> | <strong>정답:</strong> <span style="color:#166534; font-weight:bold;">${w.correctAns}</span><br>• <strong>풀이:</strong> ${w.sol}</div>`).join('');
+      : `<h3>📓 ${state.studentName} 학생의 정밀 오답 노트</h3>` + state.examWrongList.map(w => `
+        <div class="wrong-note-card">
+          <strong>❌ [${w.qNum}번 오답 노트] (${w.lessonCode}차시)</strong><br>
+          • <strong>문제:</strong> ${summarizeQuestionText(w.q)}<br>
+          • <strong>내 답:</strong> <span style="color:#dc2626; font-weight:bold;">${w.myAns}</span> | <strong>실제 정답:</strong> <span style="color:#166534; font-weight:bold;">${w.correctAns}</span><br>
+          • <strong>🔍 왜 틀렸을까요? (원인 진단):</strong> <span style="color:#b45309; font-weight:bold;">${w.diag}</span><br>
+          <div style="margin-top:8px; padding:10px; background:#ffffff; border-radius:8px; border:1px solid #fcd34d;">
+            <strong>📖 단계별 정석 풀이:</strong><br>${w.sol}
+          </div>
+        </div>`).join('');
   
     document.getElementById('app-content').innerHTML = `
       <h2>🏆 ${state.studentName} 학생의 1단원 최종 테스트 성적표 (☁️ 클라우드 저장 완료)</h2>
@@ -282,6 +440,9 @@ async function initApp() {
     `;
   }
   
+  // ==========================================
+  // 🚀 3. 차시 수업 시작 및 1~2단계 진행
+  // ==========================================
   function startLesson(lessonId) {
     state.lessonId = lessonId;
     state.lessonData = MATH_DB.lessons[state.unitKey].items[lessonId];
@@ -291,7 +452,9 @@ async function initApp() {
     state.wrongIndices = [];
     state.bRetryQueue = [];
     state.bResults = [];
+    state.bDetailedLogs = [];
     state.attempt = 1;
+    resetLessonTimer();
     document.getElementById('unit-btn').style.display = 'inline-block';
     if (state.lessonData.warmup) showWarmup();
     else showStep1Video();
@@ -331,7 +494,8 @@ async function initApp() {
   }
   
   function showWarmup() {
-    updateLessonHeader("1단계: 지난 시간 복습");
+    switchStepTimer('warmup');
+    updateLessonHeader("워밍업: 지난 시간 복습");
     state.attempt = 1;
     state.currentItem = pick(state.lessonData.warmup);
     state.currentCheckFn = checkWarmup;
@@ -369,6 +533,7 @@ async function initApp() {
   }
   
   function showStep1Video() {
+    switchStepTimer('step1');
     updateLessonHeader("1단계: 개념 영상");
     const cleanUrl = getCleanYoutubeEmbedUrl(state.lessonData.videoUrl);
     const mediaHTML = cleanUrl
@@ -384,6 +549,7 @@ async function initApp() {
   }
   
   function showStep1Quiz() {
+    switchStepTimer('step1');
     updateLessonHeader("1단계: 개념 확인 퀴즈");
     state.attempt = 1;
     state.currentItem = pick(state.lessonData.step1Quiz);
@@ -418,6 +584,7 @@ async function initApp() {
   }
   
   function showStep2_1() {
+    switchStepTimer('step2');
     updateLessonHeader("2단계: 함께 풀기 (1/2)");
     state.attempt = 1;
     state.currentItem = pick(state.lessonData.step2_1);
@@ -452,6 +619,7 @@ async function initApp() {
   }
   
   function showStep2_2() {
+    switchStepTimer('step2');
     updateLessonHeader("2단계: 혼자 풀기 (2/2)");
     state.attempt = 1;
     state.currentItem = pick(state.lessonData.step2_2);
@@ -490,9 +658,10 @@ async function initApp() {
   }
   
   // ==========================================
-  // 📝 3단계: 블라인드 실력 평가 (정·오답 표시 없이 1~3번 연속 제출)
+  // 📝 4. 3단계: 블라인드 실력 평가 & 정밀 오답 진단 리뷰
   // ==========================================
   function showStep3(idx) {
+    switchStepTimer('step3');
     if (idx === 0) {
       state.step3Answers = [];
       state.records = ['➖', '➖', '➖'];
@@ -507,11 +676,11 @@ async function initApp() {
     document.getElementById('score-board').innerText = `실력 평가 진행 중 (${idx + 1} / 3번 문항 | 3문제를 다 풀면 결과를 확인해요!)`;
     setBreadcrumb(`${state.grade}학년 > ${state.semester}학기 > ${state.unit}단원 > ${state.lessonId}차시 (3단계 실력 평가 ${idx + 1}번)`);
   
-    const btnLabel = idx < 2 ? `답안 제출하고 다음 문제(${idx + 2}번)로 이동 👉` : `3문제 모두 제출하고 채점 결과 및 리뷰 보기 👉`;
+    const btnLabel = idx < 2 ? `답안 제출하고 다음 문제(${idx + 2}번)로 이동 👉` : `3문제 모두 제출하고 채점 결과 및 정밀 리뷰 보기 👉`;
   
     document.getElementById('app-content').innerHTML = `
       <h2>📝 3단계 실력 평가 (A형 ${idx + 1}번 / 총 3문항)</h2>
-      <div class="goal-box"><strong>실력 평가 시간입니다!</strong> 정·오답은 바로 알려주지 않으며, 3문제를 끝까지 다 풀고 난 뒤에 한꺼번에 채점하고 리뷰합니다. (기약분수로 적어주세요!)</div>
+      <div class="goal-box"><strong>실력 평가 시간입니다!</strong> 정·오답은 바로 알려주지 않으며, 3문제를 끝까지 다 풀고 난 뒤에 한꺼번에 채점하고 정밀 리뷰합니다. (기약분수로 적어주세요!)</div>
       <div class="question-box">${state.currentItem.q}</div>
       ${getFractionHTML(`submitStep3Blind(${idx})`)}
       <button class="btn" id="submit-btn" onclick="submitStep3Blind(${idx})">${btnLabel}</button>
@@ -531,15 +700,21 @@ async function initApp() {
     const item = state.currentItem;
     const status = checkFractionStatus(item.num, item.den);
     const myAnsStr = (wVal ? `${wVal}과 ` : '') + `${nVal}/${dVal}` + (status === 'unreduced' ? ' (약분 안 함)' : '');
+    const typeNames = ["유형 1: 기본 계산", "유형 2: 오개념 바로잡기", "유형 3: 실생활 문장제 활용"];
   
     state.step3Answers[idx] = {
       idx: idx,
+      typeName: typeNames[idx] || `문항 ${idx + 1}`,
       q: item.q,
+      qShort: summarizeQuestionText(item.q),
       myAns: myAnsStr,
       correctAns: `${item.num}/${item.den}`,
       isCorrect: (status === 'correct'),
       status: status,
-      explanation: item.h2
+      diagnosis: (status === 'correct')
+        ? '핵심 원리와 기약분수 계산을 첫 시도에 스스로 정확히 해결함'
+        : diagnoseFractionError(item, wVal, nVal, dVal, status),
+      detailedSol: buildDetailedExplanation(item)
     };
   
     if (idx < 2) {
@@ -549,10 +724,8 @@ async function initApp() {
     }
   }
   
-  // ==========================================
-  // 📊 3단계 결과 리뷰 화면 (맞은 문제와 틀린 문제 설명 확인)
-  // ==========================================
   function finalizeStep3AndShowReview() {
+    switchStepTimer('step3');
     const weights = [30, 30, 40];
     state.score = 0;
     state.wrongIndices = [];
@@ -572,23 +745,24 @@ async function initApp() {
     const reviewCardsHTML = state.step3Answers.map((ans, idx) => {
       if (ans.isCorrect) {
         return `
-          <div class="report-card" style="border-color:#22c55e; background:#f0fdf4; margin-bottom:14px;">
-            <strong style="color:#166534; font-size:18px;">⭕ [${idx + 1}번 문제] 정답입니다! (+${weights[idx]}점)</strong><br>
-            • <strong>문제:</strong> ${ans.q.replace(/\n/g, ' ')}<br>
-            • <strong>내가 적은 답:</strong> <span style="color:#166534; font-weight:bold;">${ans.myAns}</span> (정답과 일치 👍)
+          <div class="report-card" style="border-color:#22c55e; background:#f0fdf4; margin-bottom:16px;">
+            <strong style="color:#166534; font-size:18px;">⭕ [${idx + 1}번 문제 - ${ans.typeName}] 정답입니다! (+${weights[idx]}점)</strong><br>
+            • <strong>출제 문제:</strong> ${ans.qShort}<br>
+            • <strong>내가 적은 답:</strong> <span style="color:#166534; font-weight:bold;">${ans.myAns}</span> (정답과 정확히 일치 👍)<br>
+            • <strong>평가 진단:</strong> ${ans.diagnosis}
           </div>
         `;
       } else {
-        const reasonNote = ans.status === 'unreduced'
-          ? '계산 값은 맞았지만 더 이상 나누어지지 않는 기약분수로 약분하지 않아 아쉽게 틀렸어요!'
-          : '아래 왜 틀렸는지 핵심 풀이를 읽고, 잠시 후 4단계에서 쌍둥이 문제로 완벽히 이해해 볼까요?';
         return `
-          <div class="wrong-note-card" style="margin-bottom:14px;">
-            <strong style="color:#b45309; font-size:18px;">❌ [${idx + 1}번 문제] 아쉬워요! 왜 틀렸는지 함께 확인해 볼까요?</strong><br>
-            • <strong>문제:</strong> ${ans.q.replace(/\n/g, ' ')}<br>
+          <div class="wrong-note-card" style="margin-bottom:16px;">
+            <strong style="color:#b45309; font-size:18px;">❌ [${idx + 1}번 문제 - ${ans.typeName}] 정밀 오답 분석 및 해설</strong><br>
+            • <strong>출제 문제:</strong> ${ans.qShort}<br>
             • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${ans.myAns}</span> &nbsp;|&nbsp; <strong>실제 정답:</strong> <span style="color:#166534; font-weight:bold;">${ans.correctAns}</span><br>
-            • <strong>왜 틀렸을까요? (핵심 설명):</strong> ${ans.explanation}<br>
-            <span style="font-size:14px; color:#92400e;">💡 ${reasonNote}</span>
+            • <strong>🔍 내 오답 원인 진단:</strong> <span style="color:#b45309; font-weight:bold;">${ans.diagnosis}</span><br>
+            <div style="margin-top:10px; padding:12px 14px; background:#ffffff; border-radius:10px; border:1px solid #f59e0b; line-height:1.7;">
+              <strong style="color:#1e3a8a;">📖 단계별 정석 풀이 과정:</strong><br>
+              ${ans.detailedSol}
+            </div>
           </div>
         `;
       }
@@ -603,22 +777,23 @@ async function initApp() {
     } else {
       state.bRetryQueue = [...state.wrongIndices];
       bottomBtnHTML = `
-        <div class="goal-box">💪 틀린 문제(${state.wrongIndices.map(i => (i + 1) + '번').join(', ')})의 설명을 잘 읽어보았나요?<br>이제 4단계에서 <strong>유사한 쌍둥이 문제</strong>를 풀며 완전히 내 것으로 만들어 봅시다!</div>
+        <div class="goal-box">💪 틀린 문제(${state.wrongIndices.map(i => (i + 1) + '번').join(', ')})의 <strong>오답 원인과 정석 풀이 과정</strong>을 잘 읽어보았나요?<br>이제 4단계에서 <strong>유사한 쌍둥이 문제</strong>를 풀며 완전히 내 것으로 만들어 봅시다!</div>
         <button class="btn" onclick="showStep4Intro()">4단계: 틀린 유형 쌍둥이 문제 풀러 가기 👉</button>
       `;
     }
   
     document.getElementById('app-content').innerHTML = `
-      <h2>📊 3단계 실력 평가 채점 결과 및 오답 리뷰 (${state.score}점 / 100점)</h2>
+      <h2>📊 3단계 실력 평가 채점 결과 및 정밀 오답 리뷰 (${state.score}점 / 100점)</h2>
       ${reviewCardsHTML}
       ${bottomBtnHTML}
     `;
   }
   
   // ==========================================
-  // 🔄 4단계: 틀린 문제 기반 쌍둥이 문제 보충 (최대 3회 오답 시 통과)
+  // 🔄 5. 4단계: 쌍둥이 보충 및 상세 이력 추적
   // ==========================================
   function showStep4Intro() {
+    switchStepTimer('step4');
     updateLessonHeader("4단계: 보충 및 쌍둥이 문제");
     document.getElementById('app-content').innerHTML = `
       <h2>4단계: 핵심 비법 보충 & 쌍둥이 문제 재도전</h2>
@@ -632,6 +807,7 @@ async function initApp() {
   }
   
   function showNextStep4B() {
+    switchStepTimer('step4');
     if (state.bRetryQueue.length === 0) {
       showStep5A();
       return;
@@ -645,10 +821,9 @@ async function initApp() {
     const prevWrong = state.step3Answers && state.step3Answers[qIdx] ? state.step3Answers[qIdx] : null;
     const prevReviewBanner = prevWrong ? `
       <div class="wrong-note-card" style="margin-bottom:18px; background:#fff7ed; border-color:#fdba74;">
-        <strong>📌 [아까 3단계 ${qIdx + 1}번에서 틀렸던 내 기록 돌아보기]</strong><br>
-        • <strong>아까 문제:</strong> ${prevWrong.q.replace(/\n/g, ' ')}<br>
-        • <strong>내 오답:</strong> <span style="color:#dc2626; font-weight:bold;">${prevWrong.myAns}</span> ➡️ <strong>정답:</strong> <span style="color:#166534; font-weight:bold;">${prevWrong.correctAns}</span><br>
-        • <strong>기억할 원리:</strong> ${prevWrong.explanation}
+        <strong>📌 [아까 3단계 ${qIdx + 1}번에서 틀렸던 내 기록 & 핵심 풀이]</strong><br>
+        • <strong>아까 틀린 답:</strong> <span style="color:#dc2626; font-weight:bold;">${prevWrong.myAns}</span> ➡️ <strong>정답:</strong> <span style="color:#166534; font-weight:bold;">${prevWrong.correctAns}</span><br>
+        • <strong>주의할 점:</strong> ${prevWrong.diagnosis}
       </div>
     ` : '';
   
@@ -664,16 +839,34 @@ async function initApp() {
     `;
   }
   
-  // 4단계: 1차 힌트 -> 2차 스몰 스텝 & AI -> 3차 시도 실패 시 무한 루프 방지(풀이 공개 후 이동 & 상세 기록)
+  function buildStep4HelperSummary() {
+    const helpers = [];
+    if (state.attempt >= 2) helpers.push("1차 힌트 열람");
+    if (state.smallStepIdx > 0) helpers.push(`스몰스텝 빈칸(${state.smallStepIdx}계단) 수행`);
+    const aiTurnCount = Math.floor((state.aiChatHistory ? state.aiChatHistory.length : 0) / 2);
+    if (aiTurnCount > 0) helpers.push(`소크라테스 AI 선생님과 ${aiTurnCount}회 문답`);
+    return helpers.length > 0 ? helpers.join(" + ") : "도우미 없이 스스로 해결";
+  }
+  
   function checkStep4B(qIdx) {
     const fb = document.getElementById('feedback-box');
     const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
   
     if (status === 'correct') {
+      const helperUsed = buildStep4HelperSummary();
       const passDetail = state.attempt === 1
-        ? `${qIdx + 1}번 쌍둥이: 1차 시도에 스스로 통과(⭕)`
-        : `${qIdx + 1}번 쌍둥이: ${state.attempt}차 시도에 도우미 학습 후 통과(⭕)`;
+        ? `${qIdx + 1}번 쌍둥이: 1차 시도에 도우미 없이 스스로 통과(⭕)`
+        : `${qIdx + 1}번 쌍둥이: ${state.attempt}차 시도 만에 통과 [활용 도우미: ${helperUsed}] (⭕)`;
+  
       state.bResults.push(passDetail);
+      state.bDetailedLogs.push({
+        qNum: qIdx + 1,
+        twinQ: summarizeQuestionText(state.currentItem.q),
+        correctAns: `${state.currentItem.num}/${state.currentItem.den}`,
+        attempts: state.attempt,
+        helperUsed: helperUsed,
+        passed: true
+      });
   
       const submitBtn = document.getElementById('b-submit-btn');
       if (submitBtn) submitBtn.style.display = 'none';
@@ -693,21 +886,31 @@ async function initApp() {
         state.attempt++;
         activateSmallStepIfNeeded();
       } else {
-        // 3번 연속 틀렸을 때 무한 루프 방지: 정석 풀이를 보여주고 기록을 남긴 뒤 다음으로 넘어가기 허용
-        const failDetail = `${qIdx + 1}번 쌍둥이: 3회 오답으로 정석 풀이 확인 후 이동(⚠️ 추가 복습 필요)`;
+        const helperUsed = buildStep4HelperSummary();
+        const failDetail = `${qIdx + 1}번 쌍둥이: 3회 오답으로 정석 풀이 확인 후 이동 [활용 도우미: ${helperUsed}] (⚠️ 추가 복습 필요)`;
         if (!state.bResults.some(r => r.startsWith(`${qIdx + 1}번`))) {
           state.bResults.push(failDetail);
+          state.bDetailedLogs.push({
+            qNum: qIdx + 1,
+            twinQ: summarizeQuestionText(state.currentItem.q),
+            correctAns: `${state.currentItem.num}/${state.currentItem.den}`,
+            attempts: 3,
+            helperUsed: helperUsed,
+            passed: false
+          });
         }
         const submitBtn = document.getElementById('b-submit-btn');
         if (submitBtn) submitBtn.style.display = 'none';
   
         fb.className = "feedback hint";
         fb.innerHTML = `
-          💡 <strong>[3차 시도 완료 - 정석 풀이 확인하기]</strong><br>
-          이번 문제가 조금 까다로웠죠? 끝까지 도전한 것만으로도 정말 칭찬해요! 👏<br>
+          💡 <strong>[3차 시도 완료 - 단계별 정석 풀이 확인하기]</strong><br>
+          이번 문제가 조금 까다로웠죠? 끝까지 포기하지 않고 도전한 점을 칭찬해요! 👏<br>
           • <strong>정답:</strong> <span style="color:#166534; font-weight:bold;">${state.currentItem.num}/${state.currentItem.den}</span><br>
-          • <strong>핵심 풀이:</strong> ${state.currentItem.sol || state.currentItem.h1}<br>
-          위 풀이 과정을 눈으로 꼭 익혀두고 다음 단계로 넘어가요! (이 기록은 완료 보고서에 저장됩니다)<br><br>
+          <div style="margin:8px 0; padding:10px; background:#fff; border-radius:8px; border:1px solid #f59e0b;">
+            <strong>📖 정석 풀이 과정:</strong><br>${buildDetailedExplanation(state.currentItem)}
+          </div>
+          위 풀이 과정을 눈으로 꼭 익혀두고 다음 단계로 넘어가요! (이 기록은 완료 보고서에 상세히 저장됩니다)<br><br>
           <button class="btn" onclick="showNextStep4B()">풀이 확인 완료! 다음 단계로 이동하기 👉</button>
         `;
         fb.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -715,7 +918,11 @@ async function initApp() {
     }
   }
   
+  // ==========================================
+  // 🗣️ 6. 5단계 마무리 및 정밀 완료 보고서(소요 시간 포함)
+  // ==========================================
   function showStep5A() {
+    switchStepTimer('step5');
     updateLessonHeader("5단계: 오늘 공부 마무리 (1/2)");
     const s5a = state.lessonData.step5A;
     state.currentItem = { q: s5a.q, ans: s5a.ans };
@@ -742,6 +949,7 @@ async function initApp() {
   }
   
   function showStep5B() {
+    switchStepTimer('step5');
     state.readCount = 0;
     state.readLock = false;
     updateLessonHeader("5단계: 핵심 문장 3번 소리 내어 읽기 (2/2)");
@@ -785,53 +993,170 @@ async function initApp() {
     }
   }
   
+  function buildTeacherSynthesisComment(needHelp) {
+    if (state.wrongIndices.length === 0) {
+      return "오늘 배운 핵심 개념을 완벽하게 이해하여 3단계 실력 평가의 모든 유형(기본 계산·오개념 잡기·실생활 문장제)을 첫 시도에 스스로 해결했습니다. 매우 훌륭합니다!";
+    }
+    const wrongTypes = state.wrongIndices.map(i => `${i + 1}번`).join(', ');
+    if (!needHelp) {
+      return `3단계 평가의 ${wrongTypes} 문항에서 일시적인 오개념(분자·분모 위치 혼동 또는 식 세우기 착오)이 있었으나, 오답 리뷰와 4단계 쌍둥이 보충 학습을 통해 스스로 원리를 깨우치고 약점을 완벽하게 극복했습니다!`;
+    }
+    return `3단계 평가(${wrongTypes} 문항)와 4단계 쌍둥이 보충 문제에서 다소 어려움을 겪어 정석 풀이를 확인하고 통과했습니다. 오늘 틀렸던 문항의 계산 원리를 한 번 더 복습해 보는 것을 권장합니다.`;
+  }
+  
   async function showFinalReport() {
+    switchStepTimer(null);
     updateLessonHeader("학습 완료!");
+  
+    const st = state.stepTimes || {};
+    const totalSec = (st.warmup || 0) + (st.step1 || 0) + (st.step2 || 0) + (st.step3 || 0) + (st.step4 || 0) + (st.step5 || 0);
+    const totalTimeStr = formatDuration(totalSec);
+  
     const needHelp = state.bResults.some(r => r.includes("필요"));
-    const bSummary = state.wrongIndices.length === 0 ? "해당 없음 (첫 시도 100점 완벽 통과!)" : state.bResults.join(" / ");
     const finalState = needHelp ? "추가 복습 필요" : "완료";
-    await saveStudyRecord(state.unitKey, state.lessonId, state.score, finalState);
   
+    await saveStudyRecord(state.unitKey, state.lessonId, state.score, finalState, {
+      totalTime: totalTimeStr,
+      stepTimes: st
+    });
+  
+    // 1. 3단계 문항별 정밀 분석 HTML
     const step3DetailHTML = [0, 1, 2].map(idx => {
-      const ansObj = state.step3Answers && state.step3Answers[idx];
-      if (!ansObj) return `&nbsp;&nbsp;* ${idx + 1}번: 기록 없음`;
-      return ansObj.isCorrect
-        ? `&nbsp;&nbsp;* ${idx + 1}번: ⭕ 정답 (제출 답안: ${ansObj.myAns})`
-        : `&nbsp;&nbsp;* ${idx + 1}번: ❌ 오답 (내 답: ${ansObj.myAns} ➔ 정답: ${ansObj.correctAns})`;
-    }).join('<br>');
+      const a = state.step3Answers && state.step3Answers[idx];
+      if (!a) return `<div style="margin-bottom:8px;">• ${idx + 1}번: 기록 없음</div>`;
+      if (a.isCorrect) {
+        return `
+          <div style="margin-bottom:10px; padding:10px 12px; background:#f0fdf4; border-left:4px solid #22c55e; border-radius:6px;">
+            <strong>⭕ ${idx + 1}번 [${a.typeName}] — 정답</strong> (제출 답안: <b>${a.myAns}</b>)<br>
+            <span style="font-size:14px; color:#475569;">• 출제 문제: ${a.qShort}</span>
+          </div>
+        `;
+      } else {
+        return `
+          <div style="margin-bottom:10px; padding:10px 12px; background:#fffbeb; border-left:4px solid #f59e0b; border-radius:6px;">
+            <strong>❌ ${idx + 1}번 [${a.typeName}] — 오답</strong> (내 답: <b style="color:#dc2626;">${a.myAns}</b> ➔ 정답: <b style="color:#166534;">${a.correctAns}</b>)<br>
+            <span style="font-size:14px; color:#475569;">• 출제 문제: ${a.qShort}</span><br>
+            <span style="font-size:14px; color:#b45309;">• <b>오답 원인 진단:</b> ${a.diagnosis}</span>
+          </div>
+        `;
+      }
+    }).join('');
   
+    // 2. 4단계 쌍둥이 보충 상세 이력 HTML
+    let step4DetailHTML = '';
+    if (state.wrongIndices.length === 0) {
+      step4DetailHTML = `<div style="padding:10px 12px; background:#eff6ff; border-radius:8px; color:#1e40af;">🎉 3단계 실력 평가를 100점으로 통과하여 4단계 보충 학습 없이 바로 통과했습니다!</div>`;
+    } else {
+      step4DetailHTML = (state.bDetailedLogs || []).map(log => `
+        <div style="margin-bottom:8px; padding:10px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px;">
+          <strong>🔄 ${log.qNum}번 쌍둥이 보충:</strong> ${log.passed ? `<span style="color:#166534; font-weight:bold;">${log.attempts}차 시도 만에 완벽 통과 (⭕)</span>` : `<span style="color:#dc2626; font-weight:bold;">3회 오답 후 정석 풀이 학습 (⚠️ 복습 권장)</span>`}<br>
+          <span style="font-size:14px; color:#475569;">• 보충 문제: ${log.twinQ} (정답: ${log.correctAns})</span><br>
+          <span style="font-size:14px; color:#0f766e;">• 학습 과정 및 도우미 활용: <b>${log.helperUsed}</b></span>
+        </div>
+      `).join('');
+    }
+  
+    // 3. 단계별 소요 시간 표 HTML
+    const timeBreakdownHTML = `
+      <table class="cloud-table" style="margin-top:8px; margin-bottom:14px;">
+        <thead>
+          <tr>
+            ${state.lessonData.warmup ? '<th>워밍업</th>' : ''}
+            <th>1단계(개념)</th>
+            <th>2단계(교과서)</th>
+            <th>3단계(실력평가)</th>
+            <th>4단계(쌍둥이보충)</th>
+            <th>5단계(정리·낭독)</th>
+            <th style="background:#dbeafe; color:#1e3a8a;">전체 소요 시간</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            ${state.lessonData.warmup ? `<td>${formatDuration(st.warmup)}</td>` : ''}
+            <td>${formatDuration(st.step1)}</td>
+            <td>${formatDuration(st.step2)}</td>
+            <td>${formatDuration(st.step3)}</td>
+            <td>${state.wrongIndices.length === 0 ? '면제(100점)' : formatDuration(st.step4)}</td>
+            <td>${formatDuration(st.step5)}</td>
+            <td style="font-weight:bold; color:#1d4ed8; background:#eff6ff;">⏱️ ${totalTimeStr}</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+  
+    const teacherComment = buildTeacherSynthesisComment(needHelp);
     const nextUnit = state.lessonData.nextUnit;
     const nextBtnHTML = nextUnit
       ? `<button class="btn" onclick="startLesson('${nextUnit}')">다음 시간 [${nextUnit}차시] 바로 이어서 공부하기 👉</button>`
       : `<button class="btn" style="background:#d97706;" onclick="showLessonSelect(state.grade, state.semester, state.unit)">🏆 1단원 완주! [단원 최종 테스트] 보러 가기 👉</button>`;
   
     document.getElementById('app-content').innerHTML = `
-      <h2>📊 ${state.studentName} 학생의 완전학습 완료 보고서 (☁️ 클라우드 저장됨)</h2>
+      <h2>📊 ${state.studentName} 학생의 완전학습 종합 진단 보고서 (☁️ 클라우드 저장됨)</h2>
       <div class="report-card">
-        <strong>- 학생 이름:</strong> ${state.studentName} (${state.studentGrade}학년 ${state.studentSem}학기)<br>
-        <strong>- 학습 단원:</strong> ${state.grade}학년 ${state.semester}학기 ${state.unit}단원 (${state.lessonData.title})<br>
-        <strong>- 3단계 실력 평가 점수:</strong> ${state.score}점 / 100점 만점<br>
-        ${step3DetailHTML}<br>
-        <strong>- 4단계 쌍둥이 보충 과정 기록:</strong> ${bSummary}<br>
-        <strong>- 5단계 핵심 원리 3회 낭독:</strong> 완료 ✅<br>
-        <strong>- 최종 학습 판정:</strong> [ ${finalState} ]
+        <strong>👤 기본 학습 정보</strong><br>
+        • <strong>학생 이름:</strong> ${state.studentName} (${state.studentGrade}학년 ${state.studentSem}학기)<br>
+        • <strong>학습 차시:</strong> ${state.grade}학년 ${state.semester}학기 ${state.unit}단원 (${state.lessonData.title})<br>
+        • <strong>최종 판정:</strong> <span style="font-weight:bold; color:${needHelp ? '#dc2626' : '#166534'};">[ ${finalState} ]</span> &nbsp;|&nbsp; <strong>3단계 첫 실력 평가 점수:</strong> <span style="font-weight:bold; color:#2563eb;">${state.score}점 / 100점</span>
+        
+        <hr style="border:none; border-top:1px dashed #cbd5e1; margin:16px 0;">
+        <strong>⏱️ 단계별 학습 소요 시간 (총 소요 시간: <span style="color:#2563eb;">${totalTimeStr}</span>)</strong>
+        ${timeBreakdownHTML}
+  
+        <hr style="border:none; border-top:1px dashed #cbd5e1; margin:16px 0;">
+        <strong>📝 3단계 실력 평가 문항별 정밀 분석</strong>
+        <div style="margin-top:8px;">${step3DetailHTML}</div>
+  
+        <hr style="border:none; border-top:1px dashed #cbd5e1; margin:16px 0;">
+        <strong>🔄 4단계 쌍둥이 보충 학습 상세 추적 기록</strong>
+        <div style="margin-top:8px;">${step4DetailHTML}</div>
+  
+        <hr style="border:none; border-top:1px dashed #cbd5e1; margin:16px 0;">
+        <strong>👩‍🏫 AI 튜터 종합 학습 코멘트</strong>
+        <div style="margin-top:6px; padding:12px; background:#f0fdfa; border:1px solid #5eead4; border-radius:10px; color:#134e4a; font-size:15px;">
+          "${teacherComment}"
+        </div>
       </div>
       ${nextBtnHTML}
-      <button class="btn btn-share" onclick="copyReportForParent()">📋 학부모·선생님께 결과 보내기 (카톡용 복사)</button>
+      <button class="btn btn-share" onclick="copyReportForParent()">📋 학부모·선생님께 상세 진단서 보내기 (카톡용 복사)</button>
       <button class="btn btn-secondary" onclick="showLessonSelect(state.grade, state.semester, state.unit)">📋 차시 선택 목록으로 돌아가기 (도장 확인)</button>
     `;
   }
   
   function copyReportForParent() {
-    const step3Summary = [0, 1, 2].map(idx => {
+    const st = state.stepTimes || {};
+    const totalSec = (st.warmup || 0) + (st.step1 || 0) + (st.step2 || 0) + (st.step3 || 0) + (st.step4 || 0) + (st.step5 || 0);
+    const totalTimeStr = formatDuration(totalSec);
+    const needHelp = state.bResults.some(r => r.includes("필요"));
+    const finalState = needHelp ? "추가 복습 필요" : "완전학습 통과";
+  
+    const step3Lines = [0, 1, 2].map(idx => {
       const a = state.step3Answers && state.step3Answers[idx];
-      if (!a) return `${idx + 1}번(-)`;
-      return a.isCorrect ? `${idx + 1}번(⭕ ${a.myAns})` : `${idx + 1}번(❌ 내답:${a.myAns}→정답:${a.correctAns})`;
-    }).join(' / ');
-    const bSummary = state.wrongIndices.length === 0 ? "한 번에 100점 통과" : state.bResults.join(" / ");
-    const finalState = state.bResults.some(r => r.includes("필요")) ? "추가 복습 필요" : "완전학습 통과";
-    const shareText = `[📚 ${state.studentName} 학생(${state.studentGrade}-${state.studentSem})의 초등 수학 완전학습 보고서]\n• 학습 일시: ${new Date().toLocaleString()}\n• 학습 차시: ${state.grade}학년 ${state.semester}학기 ${state.lessonData.title}\n• 3단계 실력 평가: ${state.score}점 / 100점\n  - 문항별 기록: ${step3Summary}\n• 4단계 쌍둥이 보충: ${bSummary}\n• 최종 판정: [${finalState}]`;
-    navigator.clipboard.writeText(shareText).then(() => alert('✅ 학습 보고서가 복사되었습니다! 카톡에 붙여넣기(Ctrl+V) 하세요.')).catch(() => prompt('복사(Ctrl+C)해서 전달하세요:', shareText));
+      if (!a) return `  - ${idx + 1}번: 기록 없음`;
+      if (a.isCorrect) return `  - ${idx + 1}번(${a.typeName}): ⭕ 정답 (제출: ${a.myAns})`;
+      return `  - ${idx + 1}번(${a.typeName}): ❌ 오답 (내 답: ${a.myAns} → 정답: ${a.correctAns})\n    └ 원인: ${a.diagnosis}`;
+    }).join('\n');
+  
+    const step4Lines = state.wrongIndices.length === 0
+      ? "  - 3단계 100점 통과로 보충 면제"
+      : (state.bDetailedLogs || []).map(l => `  - ${l.qNum}번 쌍둥이: ${l.passed ? `${l.attempts}차 시도 통과(⭕)` : '3회 오답 후 풀이 확인(⚠️)'} [과정: ${l.helperUsed}]`).join('\n');
+  
+    const timeLine = `1단계(${formatDuration(st.step1)}) / 2단계(${formatDuration(st.step2)}) / 3단계(${formatDuration(st.step3)}) / 4단계(${state.wrongIndices.length === 0 ? '면제' : formatDuration(st.step4)}) / 5단계(${formatDuration(st.step5)})`;
+  
+    const shareText = [
+      `[📚 ${state.studentName} 학생(${state.studentGrade}-${state.studentSem}) 초등 수학 완전학습 정밀 진단서]`,
+      `• 학습 일시: ${new Date().toLocaleString()}`,
+      `• 학습 차시: ${state.grade}학년 ${state.semester}학기 ${state.lessonData.title}`,
+      `• 전체 소요 시간: ⏱️ ${totalTimeStr}`,
+      `  └ 단계별: ${timeLine}`,
+      `• 3단계 실력 평가 점수: ${state.score}점 / 100점`,
+      step3Lines,
+      `• 4단계 쌍둥이 보충 기록:`,
+      step4Lines,
+      `• 종합 코멘트: ${buildTeacherSynthesisComment(needHelp)}`,
+      `• 최종 판정: [${finalState}]`
+    ].join('\n');
+  
+    navigator.clipboard.writeText(shareText).then(() => alert('✅ 상세 학습 진단서가 복사되었습니다! 카카오톡에 붙여넣기(Ctrl+V) 하세요.')).catch(() => prompt('복사(Ctrl+C)해서 전달하세요:', shareText));
   }
   
   initApp();

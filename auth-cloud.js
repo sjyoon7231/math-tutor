@@ -38,10 +38,12 @@ const firebaseConfig = {
     lessonId: null,
     lessonData: null,
     records: ['➖', '➖', '➖'],
+    step3Answers: [],
     score: 0,
     wrongIndices: [],
     bRetryQueue: [],
     bResults: [],
+    bDetailedLogs: [],
     attempt: 1,
     currentItem: null,
     currentCheckFn: null,
@@ -53,7 +55,11 @@ const firebaseConfig = {
     examQuestions: [],
     examIdx: 0,
     examScore: 0,
-    examWrongList: []
+    examWrongList: [],
+    lessonStartTime: null,
+    currentStepKey: null,
+    currentStepStartTime: null,
+    stepTimes: {}
   };
   
   function updateCloudBadge(isConnected) {
@@ -68,7 +74,6 @@ const firebaseConfig = {
     }
   }
   
-  // 유튜브 자동 자막 끄기(cc_load_policy=0) 및 알림 끄기(iv_load_policy=3) 적용
   function getCleanYoutubeEmbedUrl(rawUrl) {
     if (!rawUrl) return '';
     const match = rawUrl.match(/(?:embed\/|watch\?v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
@@ -115,10 +120,15 @@ const firebaseConfig = {
     }
   }
   
-  async function saveStudyRecord(unitKey, lessonId, score, status) {
+  async function saveStudyRecord(unitKey, lessonId, score, status, extraMeta = {}) {
     const records = getStudyRecords();
     if (!records[unitKey]) records[unitKey] = {};
-    records[unitKey][lessonId] = { score, status, date: new Date().toLocaleDateString() };
+    records[unitKey][lessonId] = {
+      score,
+      status,
+      date: new Date().toLocaleDateString(),
+      ...extraMeta
+    };
     state.cloudRecords = records;
     localStorage.setItem(getCurrentRecordKey(), JSON.stringify(records));
   
