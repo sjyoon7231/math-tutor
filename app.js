@@ -1,5 +1,5 @@
 // ==========================================
-// ⏱️ 1. 단계별 소요 시간 측정 및 정밀 오답 분석 도구
+// ⏱️ 1. 단계별 소요 시간 측정 및 족집게 오답 진단 도구
 // ==========================================
 function resetLessonTimer() {
     state.lessonStartTime = Date.now();
@@ -27,15 +27,24 @@ function resetLessonTimer() {
   
   function formatDuration(sec) {
     const s = Math.max(0, Math.round(sec || 0));
-    if (s === 0) return "0초 (해당 없음)";
+    if (s === 0) return "0초";
     const m = Math.floor(s / 60);
     const rem = s % 60;
     if (m === 0) return `${rem}초`;
     return `${m}분 ${rem}초`;
   }
   
-  // 학생이 적은 분수 오답과 실제 정답을 비교하여 왜 틀렸는지 구체적인 원인을 진단하는 함수
-  function diagnoseFractionError(item, wVal, nVal, dVal, status) {
+  // 제목과 중복되는 [유형 1: ...] 꼬리표를 지워 깔끔한 문제 문장으로 만드는 함수
+  function cleanQuestionText(rawQ) {
+    return rawQ
+      .replace(/^\[[^\]]+\]\s*/, '')
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  
+  // 학생이 적은 오답의 모양을 보고 구체적인 원인을 족집게처럼 짚어주는 함수
+  function diagnoseFractionError(item, wVal, nVal, dVal) {
     const w = parseInt(wVal || "0", 10);
     const n = parseInt(nVal, 10);
     const d = parseInt(dVal, 10);
@@ -43,19 +52,7 @@ function resetLessonTimer() {
     const targetD = item.den;
     const studentTotalN = w * d + n;
   
-    if (status === 'unreduced') {
-      return `계산 과정과 원리는 정확하게 이해했지만, 마지막에 분자(${studentTotalN})와 분모(${d})를 공약수로 나누어 '기약분수(${targetN}/${targetD})'로 약분하지 않아 아쉽게 틀렸습니다.`;
-    }
-  
-    // 1. 분자와 분모를 위아래 반대로 적은 경우 (예: 7/9 대신 9/7, 5/2 대신 2/5)
-    if (studentTotalN === targetD && d === targetN) {
-      if (item.q.includes('유형 3') || item.q.includes('똑같이 나누어') || item.q.includes('한 ')) {
-        return `문장제 문제에서 '전체 양(나누어지는 수)'과 '나누는 수'의 순서를 반대로 세웠습니다. 전체 양(${targetN})을 나누는 수(${targetD})로 나누어 분자에 ${targetN}, 분모에 ${targetD}를 적어야 하는데 위아래를 거꾸로(${studentTotalN}/${d}) 적었습니다.`;
-      }
-      return `나눗셈을 분수로 바꿀 때 분자(위)와 분모(아래)의 위치가 반대로 뒤바뀌었습니다! 나눗셈 기호(÷) 앞의 수가 분자(${targetN})로, 뒤의 수가 분모(${targetD})로 가야 하는데 위아래를 거꾸로(${studentTotalN}/${d}) 적었습니다.`;
-    }
-  
-    // 2. 대분수를 가분수로 바꾸지 않고 자연수나 분자만 계산한 경우
+    // 1. 대분수 나눗셈 (예: 2와 2/5 ÷ 3)
     const mixedMatch = item.q.match(/(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
     if (mixedMatch) {
       const mw = parseInt(mixedMatch[1], 10);
@@ -63,30 +60,64 @@ function resetLessonTimer() {
       const md = parseInt(mixedMatch[3], 10);
       const mc = parseInt(mixedMatch[4], 10);
       const impN = mw * md + mn;
-      if (n === mn && d === md * mc) {
-        return `대분수(${mw}과 ${mn}/${md})를 가분수(${impN}/${md})로 먼저 고치지 않고, 앞의 자연수 ${mw}을 빠뜨린 채 진분수 부분만 계산했습니다.`;
+  
+      if (studentTotalN * md === impN * d) {
+        return `문제에 있는 대분수(${mw}과 ${mn}/${md})를 그대로 적고, 아직 나누기 ${mc}를 계산하지 않았어요!`;
       }
-      return `대분수(${mw}과 ${mn}/${md})를 가분수(${impN}/${md})로 고치거나 분모에 나누는 수(${mc})를 곱하는 과정에서 계산 실수가 있었습니다.`;
+      if (w === mw || (n === mn && d === md * mc) || (mn % mc === 0 && n === mn / mc && d === md)) {
+        return `대분수(${mw}과 ${mn}/${md})를 가분수(${impN}/${md})로 먼저 바꾸지 않고, 자연수 ${mw}을 빼놓은 채 분수 부분만 나누었어요! 자연수 ${mw}도 함께 나누어야 합니다.`;
+      }
+      return `대분수 ${mw}과 ${mn}/${md}을 가분수 ${impN}/${md}로 바꾼 뒤 분모에 ${mc}를 곱하는 과정에서 작은 계산 실수가 있었어요.`;
     }
   
-    // 3. 나누는 수를 분모가 아닌 분자에 곱한 경우
+    // 2. 진분수/가분수 ÷ 자연수 (예: 6/11 ÷ 2, 8/12 ÷ 4)
     const fracMatch = item.q.match(/(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
     if (fracMatch) {
       const fn = parseInt(fracMatch[1], 10);
       const fd = parseInt(fracMatch[2], 10);
       const fc = parseInt(fracMatch[3], 10);
+  
+      // (1) 문제의 분수를 그대로 옮겨 적은 경우 (예: 6/11 ÷ 2 -> 6/11, 또는 8/12 ÷ 4 -> 2/3)
+      if (studentTotalN === fn && d === fd) {
+        return `문제에 있는 분수 ${fn}/${fd}를 그대로 옮겨 적었어요! 나누기 ${fc}를 아직 계산하지 않았습니다.`;
+      }
+      if (studentTotalN * fd === fn * d) {
+        return `분자와 분모를 모두 ${fc}로 나누어 ${studentTotalN}/${d}이라고 적었네요! 분자와 분모를 같은 수로 나누면 '약분'만 한 셈이 되어 원래 분수(${fn}/${fd})와 크기가 똑같아져요. 분모 ${fd}는 나누지 말고 그대로 두어야 합니다!`;
+      }
+      // (2) 나누지 않고 거꾸로 곱한 경우 (예: 6/11 ÷ 2 -> 12/11)
       if (studentTotalN === fn * fc && d === fd) {
-        return `(÷ ${fc})는 (× 1/${fc})이므로 나누는 수 ${fc}를 '분모(${fd})'에 곱해야 하는데, 실수로 '분자(${fn})'에 곱하여 ${studentTotalN}/${d}라고 적었습니다.`;
+        return `나누기 ${fc}를 해야 하는데 거꾸로 분자에 ${fc}를 곱해서 ${studentTotalN}/${d}이라고 적었어요! (÷ ${fc})는 분자를 ${fc}로 나누거나 분모에 ${fc}를 곱해야 합니다.`;
       }
-      if (d === fd && studentTotalN !== targetN) {
-        return `분모(${fd})는 맞았지만 분자 나눗셈이나 곱셈 계산 과정에서 작은 계산 실수가 있었습니다.`;
+      // (3) 분자도 나누고 분모에도 곱해버린 경우 (예: 6/11 ÷ 2 -> 3/22)
+      if (fn % fc === 0 && studentTotalN === fn / fc && d === fd * fc) {
+        return `분자도 ${fc}로 나누고(${fn}÷${fc}=${studentTotalN}), 분모에도 ${fc}를 곱해서(${fd}×${fc}=${d}) 나누기를 두 번이나 계산했어요! 둘 중 한 가지 방법으로만 계산해야 합니다.`;
       }
+      // (4) 분모만 나눈 경우 (예: 8/12 ÷ 4 -> 8/3)
+      if (fd % fc === 0 && studentTotalN === fn && d === fd / fc) {
+        return `분모(${fd})를 ${fc}로 나누어 ${studentTotalN}/${d}이라고 적었네요! 분모가 아니라 분자(${fn})를 ${fc}로 나누거나 분모에 ${fc}를 곱해야 합니다.`;
+      }
+      // (5) 분자와 분모를 위아래 반대로 적은 경우
+      if (studentTotalN * targetN === d * targetD) {
+        return `계산한 숫자는 맞았지만 분자(위)와 분모(아래)의 위치를 위아래 거꾸로 적었어요!`;
+      }
+      if (d === fd) {
+        return `분모(${fd})는 그대로 잘 두었지만, 분자 ${fn}을 ${fc}로 나누는 계산(${fn} ÷ ${fc})을 다시 확인해 보세요!`;
+      }
+      return `분수 ${fn}/${fd}를 ${fc}로 나눌 때는 분자를 ${fc}로 나누거나, 분모 ${fd}에 ${fc}를 곱해서 계산해야 합니다.`;
     }
   
-    return `나눗셈 식을 세우거나 분수로 바꾸는 과정에서 분자(${targetN}) 또는 분모(${targetD}) 계산에 착오가 있었습니다.`;
+    // 3. 자연수 ÷ 자연수 또는 문장제 (예: 7 ÷ 9 -> 9/7, 물 5L를 2통에 -> 2/5)
+    if (studentTotalN * targetN === d * targetD) {
+      if (item.q.includes('유형 3') || item.q.includes('똑같이 나누어') || item.q.includes('한 ')) {
+        return `문장제 문제에서 '전체 양(${targetN})'과 '나누는 수(${targetD})'의 순서를 반대로 세웠어요! 전체 양 ${targetN}을 ${targetD}로 나누어야 하므로 분자에 ${targetN}, 분모에 ${targetD}를 적어야 합니다.`;
+      }
+      return `나눗셈 기호(÷) 앞의 수와 뒤의 수 위치가 위아래로 뒤바뀌었어요! 앞의 수(${targetN})가 분자(위)로, 뒤의 수(${targetD})가 분모(아래)로 가야 합니다.`;
+    }
+  
+    return `나눗셈 식을 세우거나 분수로 바꾸는 과정에서 분자(${targetN}) 또는 분모(${targetD})의 숫자를 다시 확인해 보세요!`;
   }
   
-  // 문제 텍스트와 힌트를 조합하여 3단계 상세 정석 해설을 생성하는 함수
+  // 초등학생 눈높이 용어와 '④ 거꾸로 확인하기(검산)'가 포함된 4단계 풀이 생성기
   function buildDetailedExplanation(item) {
     const mixedMatch = item.q.match(/(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
     if (mixedMatch) {
@@ -95,10 +126,14 @@ function resetLessonTimer() {
       const d = parseInt(mixedMatch[3], 10);
       const c = parseInt(mixedMatch[4], 10);
       const impN = w * d + n;
+      const rawN = impN;
+      const rawD = d * c;
+      const reduceNote = (rawN !== item.num || rawD !== item.den) ? ` (약분하면 <b>${item.num}/${item.den}</b>)` : '';
       return [
-        `① [가분수로 바꾸기] 대분수 ${w}과 ${n}/${d}을 가분수로 고치면 분자는 (${w}×${d}+${n}) = ${impN}이므로 ${impN}/${d}이 됩니다.`,
-        `② [곱셈으로 바꾸어 계산] ${impN}/${d} ÷ ${c} = ${impN}/${d} × 1/${c} = ${impN}/${d * c} 입니다.`,
-        `③ [기약분수 정답] 약분하여 정리하면 최종 정답은 ${item.num}/${item.den} 입니다.`
+        `① <b>먼저 알아 둘 것:</b> 대분수는 자연수까지 함께 나누어야 하므로 반드시 가분수로 먼저 바꿉니다.`,
+        `② <b>차근차근 계산하기:</b> ${w}과 ${n}/${d}를 가분수로 바꾸면 ${impN}/${d}이고, ${impN}/${d} ÷ ${c} = ${impN}/${d} × 1/${c} = ${rawN}/${rawD}${reduceNote} 입니다.`,
+        `③ <b>정답:</b> <b>${item.num}/${item.den}</b>`,
+        `④ <b>거꾸로 확인하기(검산):</b> 구한 몫(${item.num}/${item.den})에 나누는 수 ${c}를 곱하면 원래 수(${impN}/${d} = ${w}과 ${n}/${d})가 되므로 맞습니다!`
       ].join('<br>');
     }
   
@@ -107,17 +142,38 @@ function resetLessonTimer() {
       const n = parseInt(fracMatch[1], 10);
       const d = parseInt(fracMatch[2], 10);
       const c = parseInt(fracMatch[3], 10);
-      if (n % c === 0 && d === item.den) {
+  
+      const extraMisconceptionTip = (item.q.includes('모두') && item.q.includes('나누어'))
+        ? `<br>💡 <b>꼭 기억해요:</b> 분자와 분모를 모두 ${c}로 나누면 나눗셈을 한 것이 아니라 '약분'만 한 셈이 되어 원래 분수(${n}/${d})와 크기가 그대로 같아집니다!`
+        : '';
+  
+      if (n % c === 0) {
+        const divN = n / c;
+        const isReducedFurther = (divN !== item.num || d !== item.den);
+        const step2Str = isReducedFurther
+          ? `${n}/${d} ÷ ${c} = (${n} ÷ ${c})/${d} = <b>${divN}/${d}</b> 이고, 분자와 분모를 한 번 더 약분하면 <b>${item.num}/${item.den}</b>이 됩니다.`
+          : `${n}/${d} ÷ ${c} = (${n} ÷ ${c})/${d} = <b>${item.num}/${item.den}</b>`;
+        const ansStr = isReducedFurther ? `<b>${item.num}/${item.den}</b> (약분하기 전인 <b>${divN}/${d}</b>도 정답!)` : `<b>${item.num}/${item.den}</b>`;
+  
         return [
-          `① [원리 확인] 분자(${n})가 자연수(${c})로 나누어떨어질 때는 분모(${d})를 그대로 두고 분자끼리만 나눕니다.`,
-          `② [계산 과정] ${n}/${d} ÷ ${c} = (${n} ÷ ${c})/${d} = ${n / c}/${d}`,
-          `③ [최종 정답] 따라서 바른 몫은 ${item.num}/${item.den} 입니다.`
+          `① <b>먼저 알아 둘 것:</b> 분자(${n})가 자연수(${c})로 나누어떨어질 때는 분모(${d})는 그대로 두고 분자만 ${c}로 나눕니다.${extraMisconceptionTip}`,
+          `② <b>차근차근 계산하기:</b> ${step2Str}`,
+          `③ <b>정답:</b> ${ansStr}`,
+          `④ <b>거꾸로 확인하기(검산):</b> (몫 ${divN}/${d}) × (나누는 수 ${c}) = ${n}/${d}가 되므로 맞습니다!`
         ].join('<br>');
       }
+  
+      const rawD = d * c;
+      const isReducedFurther = (n !== item.num || rawD !== item.den);
+      const step2Str = isReducedFurther
+        ? `${n}/${d} ÷ ${c} = ${n}/${d} × 1/${c} = <b>${n}/${rawD}</b> 이고, 약분하면 <b>${item.num}/${item.den}</b>이 됩니다.`
+        : `${n}/${d} ÷ ${c} = ${n}/${d} × 1/${c} = ${n}/(${d} × ${c}) = <b>${item.num}/${item.den}</b>`;
+  
       return [
-        `① [곱셈으로 바꾸기] 나누기 자연수(÷ ${c})는 분수의 곱셈(× 1/${c})으로 바꾸어 분모에 ${c}를 곱합니다.`,
-        `② [계산 과정] ${n}/${d} ÷ ${c} = ${n}/${d} × 1/${c} = ${n}/(${d} × ${c}) = ${n}/${d * c}`,
-        `③ [기약분수 정답] 기약분수로 나타내면 최종 정답은 ${item.num}/${item.den} 입니다.`
+        `① <b>먼저 알아 둘 것:</b> 나누기 자연수(÷ ${c})는 곱하기(× 1/${c})로 바꾸어 분모에 ${c}를 곱합니다.`,
+        `② <b>차근차근 계산하기:</b> ${step2Str}`,
+        `③ <b>정답:</b> <b>${item.num}/${item.den}</b>`,
+        `④ <b>거꾸로 확인하기(검산):</b> (몫 ${item.num}/${item.den}) × (나누는 수 ${c}) = ${n}/${d}가 되므로 맞습니다!`
       ].join('<br>');
     }
   
@@ -126,21 +182,19 @@ function resetLessonTimer() {
       const a = parseInt(natMatch[1], 10);
       const b = parseInt(natMatch[2], 10);
       return [
-        `① [핵심 원리] (자연수) ÷ (자연수)의 몫은 나누어지는 수(÷ 앞의 수)가 분자(위), 나누는 수(÷ 뒤의 수)가 분모(아래)가 됩니다.`,
-        `② [식 적용하기] ${a} ÷ ${b} 에서 앞의 수 ${a}를 분자에, 뒤의 수 ${b}를 분모에 적으면 ${a}/${b}가 됩니다.`,
-        `③ [최종 정답] 기약분수로 나타낸 정답은 ${item.num}/${item.den} 입니다.`
+        `① <b>먼저 알아 둘 것:</b> 나눗셈 기호(÷) 앞의 수(${a})는 분자(위)에, 뒤의 수(${b})는 분모(아래)에 적습니다.`,
+        `② <b>차근차근 계산하기:</b> ${a} ÷ ${b} = <b>${item.num}/${item.den}</b>`,
+        `③ <b>정답:</b> <b>${item.num}/${item.den}</b>`,
+        `④ <b>거꾸로 확인하기(검산):</b> (몫 ${item.num}/${item.den}) × (나누는 수 ${b}) = ${a}가 되므로 맞습니다!`
       ].join('<br>');
     }
   
     return [
-      `① [문제 이해] ${item.h1}`,
-      `② [식 세우기 및 계산] ${item.h2}`,
-      `③ [최종 정답] 따라서 구하는 정답은 ${item.num}/${item.den} 입니다.`
+      `① <b>먼저 알아 둘 것:</b> ${item.h1}`,
+      `② <b>차근차근 계산하기:</b> ${item.h2}`,
+      `③ <b>정답:</b> <b>${item.num}/${item.den}</b>`,
+      `④ <b>거꾸로 확인하기(검산):</b> (몫 ${item.num}/${item.den}) × (나누는 수 ${item.den}) = ${item.num}이 되므로 맞습니다!`
     ].join('<br>');
-  }
-  
-  function summarizeQuestionText(rawQ) {
-    return rawQ.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
   }
   
   // ==========================================
@@ -361,7 +415,7 @@ function resetLessonTimer() {
     state.currentItem = item;
     state.currentCheckFn = submitUnitExamAnswer;
     document.getElementById('step-badge').innerText = `🏆 단원 최종 테스트 (${idx + 1}/${total})`;
-    document.getElementById('score-board').innerText = `실전 시험 중 (힌트·AI 없음 | 문항당 20점)`;
+    document.getElementById('score-board').innerText = `실전 시험 중 (힌트·AI 없음)`;
     setBreadcrumb(`${state.grade}학년 > ${state.semester}학기 > ${state.unit}단원 > 단원 테스트 (${idx + 1}번)`);
   
     const demoSkipBtn = idx < total - 1
@@ -370,7 +424,7 @@ function resetLessonTimer() {
     document.getElementById('app-content').innerHTML = `
       <h2>🏆 1단원 최종 테스트 (${idx + 1}번 / 총 ${total}문항)</h2>
       <div class="goal-box">실전 단원 테스트에서는 힌트와 AI 선생님이 제공되지 않습니다. (출제 범위: ${item.lessonCode}차시)</div>
-      <div class="question-box">${item.q}</div>
+      <div class="question-box">${cleanQuestionText(item.q)}</div>
       ${getFractionHTML('submitUnitExamAnswer')}
       <button class="btn" onclick="submitUnitExamAnswer()">답안 제출하기 (${idx + 1}/${total}) 👉</button>
       ${demoSkipBtn}
@@ -388,11 +442,11 @@ function resetLessonTimer() {
     }
   
     const status = checkFractionStatus(item.num, item.den);
-    if (status === 'correct') {
+    if (status === 'correct' || status === 'unreduced') {
       state.examScore += 20;
     } else {
-      const myAnsStr = (wVal ? `${wVal}과 ` : '') + `${nVal}/${dVal}` + (status === 'unreduced' ? ' (약분 안 함)' : '');
-      const diag = diagnoseFractionError(item, wVal, nVal, dVal, status);
+      const myAnsStr = (wVal ? `${wVal}과 ` : '') + `${nVal}/${dVal}`;
+      const diag = diagnoseFractionError(item, wVal, nVal, dVal);
       const fullSol = buildDetailedExplanation(item);
       state.examWrongList.push({ qNum: state.examIdx + 1, lessonCode: item.lessonCode, q: item.q, myAns: myAnsStr, correctAns: `${item.num}/${item.den}`, diag, sol: fullSol });
     }
@@ -416,14 +470,14 @@ function resetLessonTimer() {
   
     const wrongNotesHTML = state.examWrongList.length === 0
       ? `<div class="goal-box">🎉 완벽합니다, ${state.studentName} 학생! 5문제를 모두 맞혀 1단원 분수의 나눗셈을 마스터했습니다!</div>`
-      : `<h3>📓 ${state.studentName} 학생의 정밀 오답 노트</h3>` + state.examWrongList.map(w => `
+      : `<h3>📓 ${state.studentName} 학생의 오답 노트</h3>` + state.examWrongList.map(w => `
         <div class="wrong-note-card">
-          <strong>❌ [${w.qNum}번 오답 노트] (${w.lessonCode}차시)</strong><br>
-          • <strong>문제:</strong> ${summarizeQuestionText(w.q)}<br>
-          • <strong>내 답:</strong> <span style="color:#dc2626; font-weight:bold;">${w.myAns}</span> | <strong>실제 정답:</strong> <span style="color:#166534; font-weight:bold;">${w.correctAns}</span><br>
-          • <strong>🔍 왜 틀렸을까요? (원인 진단):</strong> <span style="color:#b45309; font-weight:bold;">${w.diag}</span><br>
+          <strong>❌ [${w.qNum}번 문제 왜 틀렸을까요?] (${w.lessonCode}차시)</strong><br>
+          • <strong>문제:</strong> ${cleanQuestionText(w.q)}<br>
+          • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${w.myAns}</span> | <strong>실제 정답:</strong> <span style="color:#166534; font-weight:bold;">${w.correctAns}</span><br>
+          • <strong>🔍 내가 틀린 까닭:</strong> <span style="color:#b45309; font-weight:bold;">${w.diag}</span><br>
           <div style="margin-top:8px; padding:10px; background:#ffffff; border-radius:8px; border:1px solid #fcd34d;">
-            <strong>📖 단계별 정석 풀이:</strong><br>${w.sol}
+            <strong>📖 차근차근 풀어 보기:</strong><br>${w.sol}
           </div>
         </div>`).join('');
   
@@ -431,7 +485,7 @@ function resetLessonTimer() {
       <h2>🏆 ${state.studentName} 학생의 1단원 최종 테스트 성적표 (☁️ 클라우드 저장 완료)</h2>
       <div class="report-card">
         <strong>- 학생 이름:</strong> ${state.studentName}<br>
-        <strong>- 단원 테스트 점수:</strong> <span style="font-size:22px; color:#2563eb; font-weight:bold;">${state.examScore}점</span> / 100점 만점 (${5 - state.examWrongList.length}/5문항 정답)<br>
+        <strong>- 단원 테스트 점수:</strong> <span style="font-size:22px; color:#2563eb; font-weight:bold;">${state.examScore}점</span> / 100점 (${5 - state.examWrongList.length}/5개 정답)<br>
         <strong>- 종합 판정:</strong> ${state.examScore >= 80 ? '🌟 단원 마스터 통과!' : '💪 오답 노트 복습 권장'}
       </div>
       ${wrongNotesHTML}
@@ -513,12 +567,10 @@ function resetLessonTimer() {
   function checkWarmup() {
     const fb = document.getElementById('feedback-box');
     const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
-    if (status === 'correct') {
+    if (status === 'correct' || status === 'unreduced') {
+      const reduceTip = status === 'unreduced' ? `<br>💡 참고: 분자와 분모를 약분하면 기약분수 <strong>${state.currentItem.num}/${state.currentItem.den}</strong>으로도 나타낼 수 있어요!` : '';
       fb.className = "feedback correct";
-      fb.innerHTML = `지난 시간 내용을 완벽하게 기억하고 있네요! 👍 (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)<br><br><button class="btn" onclick="showStep1Video()">오늘의 개념 보러 가기 👉</button>`;
-    } else if (status === 'unreduced') {
-      fb.className = "feedback hint";
-      fb.innerText = "💡 계산은 정확해요! 더 이상 나누어지지 않는 '기약분수'로 약분해서 다시 적어볼까요?";
+      fb.innerHTML = `지난 시간 내용을 완벽하게 기억하고 있네요! 👍 (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)${reduceTip}<br><br><button class="btn" onclick="showStep1Video()">오늘의 개념 보러 가기 👉</button>`;
     } else {
       fb.className = "feedback hint";
       if (state.attempt === 1) {
@@ -638,12 +690,10 @@ function resetLessonTimer() {
   function checkStep2_2() {
     const fb = document.getElementById('feedback-box');
     const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
-    if (status === 'correct') {
+    if (status === 'correct' || status === 'unreduced') {
+      const reduceTip = status === 'unreduced' ? `<br>💡 참고: 약분하면 기약분수 <strong>${state.currentItem.num}/${state.currentItem.den}</strong>으로도 나타낼 수 있어요!` : '';
       fb.className = "feedback correct";
-      fb.innerHTML = `완벽해요! (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)<br><br><button class="btn" onclick="showStep3(0)">3단계 실력 평가 시작하기 👉</button>`;
-    } else if (status === 'unreduced') {
-      fb.className = "feedback hint";
-      fb.innerText = "💡 계산 원리는 완벽해요! 하지만 '기약분수'로 약분해서 다시 적어보세요!";
+      fb.innerHTML = `완벽해요! (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)${reduceTip}<br><br><button class="btn" onclick="showStep3(0)">3단계 실력 평가 시작하기 👉</button>`;
     } else {
       fb.className = "feedback hint";
       if (state.attempt === 1) {
@@ -658,7 +708,7 @@ function resetLessonTimer() {
   }
   
   // ==========================================
-  // 📝 4. 3단계: 블라인드 실력 평가 & 정밀 오답 진단 리뷰
+  // 📝 4. 3단계: 블라인드 실력 평가 & 어린이 눈높이 리뷰
   // ==========================================
   function showStep3(idx) {
     switchStepTimer('step3');
@@ -672,16 +722,17 @@ function resetLessonTimer() {
     state.currentItem = pick(state.lessonData.step3A[idx]);
     state.currentCheckFn = () => submitStep3Blind(idx);
   
-    document.getElementById('step-badge').innerText = `${state.lessonId}차시 | 3단계: 실력 평가 (${idx + 1}/3)`;
-    document.getElementById('score-board').innerText = `실력 평가 진행 중 (${idx + 1} / 3번 문항 | 3문제를 다 풀면 결과를 확인해요!)`;
-    setBreadcrumb(`${state.grade}학년 > ${state.semester}학기 > ${state.unit}단원 > ${state.lessonId}차시 (3단계 실력 평가 ${idx + 1}번)`);
+    document.getElementById('step-badge').innerText = `${state.lessonId}차시 | 3단계: 실력 확인 (${idx + 1}/3)`;
+    document.getElementById('score-board').innerText = `실력 확인 진행 중 (${idx + 1} / 3번 문항 | 3문제를 다 풀면 결과를 확인해요!)`;
+    setBreadcrumb(`${state.grade}학년 > ${state.semester}학기 > ${state.unit}단원 > ${state.lessonId}차시 (3단계 실력 확인 ${idx + 1}번)`);
   
-    const btnLabel = idx < 2 ? `답안 제출하고 다음 문제(${idx + 2}번)로 이동 👉` : `3문제 모두 제출하고 채점 결과 및 정밀 리뷰 보기 👉`;
+    const typeNames = ["유형 1: 기본 계산", "유형 2: 오개념 바로잡기", "유형 3: 실생활 활용"];
+    const btnLabel = idx < 2 ? `답안 제출하고 다음 문제(${idx + 2}번)로 이동 👉` : `3문제 모두 제출하고 실력 확인 결과 보기 👉`;
   
     document.getElementById('app-content').innerHTML = `
-      <h2>📝 3단계 실력 평가 (A형 ${idx + 1}번 / 총 3문항)</h2>
-      <div class="goal-box"><strong>실력 평가 시간입니다!</strong> 정·오답은 바로 알려주지 않으며, 3문제를 끝까지 다 풀고 난 뒤에 한꺼번에 채점하고 정밀 리뷰합니다. (기약분수로 적어주세요!)</div>
-      <div class="question-box">${state.currentItem.q}</div>
+      <h2>📝 3단계 실력 확인 (${idx + 1}번 - ${typeNames[idx]})</h2>
+      <div class="goal-box"><strong>스스로 풀어보는 시간입니다!</strong> 맞았는지 틀렸는지는 바로 알려주지 않으며, 3문제를 끝까지 다 풀고 난 뒤에 한꺼번에 확인합니다.</div>
+      <div class="question-box">${cleanQuestionText(state.currentItem.q)}</div>
       ${getFractionHTML(`submitStep3Blind(${idx})`)}
       <button class="btn" id="submit-btn" onclick="submitStep3Blind(${idx})">${btnLabel}</button>
     `;
@@ -699,21 +750,30 @@ function resetLessonTimer() {
   
     const item = state.currentItem;
     const status = checkFractionStatus(item.num, item.den);
-    const myAnsStr = (wVal ? `${wVal}과 ` : '') + `${nVal}/${dVal}` + (status === 'unreduced' ? ' (약분 안 함)' : '');
-    const typeNames = ["유형 1: 기본 계산", "유형 2: 오개념 바로잡기", "유형 3: 실생활 문장제 활용"];
+    // 크기가 같은 분수(unreduced)도 모두 정답으로 인정!
+    const isRight = (status === 'correct' || status === 'unreduced');
+    const myAnsStr = (wVal ? `${wVal}과 ` : '') + `${nVal}/${dVal}`;
+    const typeNames = ["유형 1: 기본 계산", "유형 2: 오개념 바로잡기", "유형 3: 실생활 활용"];
+  
+    let diagText = '';
+    if (status === 'correct') {
+      diagText = '핵심 원리에 맞게 식을 세우고 기약분수로 정확하게 잘 풀었어요!';
+    } else if (status === 'unreduced') {
+      diagText = `정답이에요! (${myAnsStr}과 ${item.num}/${item.den}은 크기가 같은 분수예요. 분자와 분모를 한 번 더 약분하면 기약분수 ${item.num}/${item.den}로 더 깔끔하게 쓸 수 있어요!)`;
+    } else {
+      diagText = diagnoseFractionError(item, wVal, nVal, dVal);
+    }
   
     state.step3Answers[idx] = {
       idx: idx,
       typeName: typeNames[idx] || `문항 ${idx + 1}`,
       q: item.q,
-      qShort: summarizeQuestionText(item.q),
+      qClean: cleanQuestionText(item.q),
       myAns: myAnsStr,
       correctAns: `${item.num}/${item.den}`,
-      isCorrect: (status === 'correct'),
+      isCorrect: isRight,
       status: status,
-      diagnosis: (status === 'correct')
-        ? '핵심 원리와 기약분수 계산을 첫 시도에 스스로 정확히 해결함'
-        : diagnoseFractionError(item, wVal, nVal, dVal, status),
+      diagnosis: diagText,
       detailedSol: buildDetailedExplanation(item)
     };
   
@@ -726,41 +786,52 @@ function resetLessonTimer() {
   
   function finalizeStep3AndShowReview() {
     switchStepTimer('step3');
-    const weights = [30, 30, 40];
-    state.score = 0;
     state.wrongIndices = [];
+    let correctCount = 0;
   
     state.step3Answers.forEach((ans, idx) => {
       if (ans.isCorrect) {
         state.records[idx] = '⭕';
-        state.score += weights[idx];
+        correctCount++;
       } else {
         state.records[idx] = '❌';
         state.wrongIndices.push(idx);
       }
     });
   
-    updateLessonHeader("3단계: 실력 평가 결과 리뷰");
+    // 문항별 차등 배점 없이 맞힌 개수 비례 점수 (0점, 33점, 67점, 100점)
+    state.score = Math.round((correctCount / 3) * 100);
+    updateLessonHeader("3단계: 실력 확인 결과");
+  
+    const summaryBarHTML = `
+      <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+        ${state.step3Answers.map((a, i) => `
+          <span style="padding:6px 12px; border-radius:999px; font-weight:bold; font-size:14px; background:${a.isCorrect ? '#dcfce7' : '#fee2e2'}; color:${a.isCorrect ? '#166534' : '#991b1b'};">
+            ${i + 1}번(${a.typeName.split(':')[0]}): ${a.isCorrect ? `⭕ 맞음 (${a.myAns})` : `❌ 틀림 (내 답: ${a.myAns})`}
+          </span>
+        `).join('')}
+      </div>
+    `;
   
     const reviewCardsHTML = state.step3Answers.map((ans, idx) => {
       if (ans.isCorrect) {
         return `
-          <div class="report-card" style="border-color:#22c55e; background:#f0fdf4; margin-bottom:16px;">
-            <strong style="color:#166534; font-size:18px;">⭕ [${idx + 1}번 문제 - ${ans.typeName}] 정답입니다! (+${weights[idx]}점)</strong><br>
-            • <strong>출제 문제:</strong> ${ans.qShort}<br>
-            • <strong>내가 적은 답:</strong> <span style="color:#166534; font-weight:bold;">${ans.myAns}</span> (정답과 정확히 일치 👍)<br>
-            • <strong>평가 진단:</strong> ${ans.diagnosis}
+          <div class="report-card" style="border-color:#22c55e; background:#f0fdf4; margin-bottom:16px; padding:16px;">
+            <strong style="color:#166534; font-size:18px;">⭕ [${idx + 1}번 문제 - ${ans.typeName}] 잘했어요! 맞았습니다!</strong><br>
+            • <strong>문제:</strong> ${ans.qClean}<br>
+            • <strong>내가 적은 답:</strong> <span style="color:#166534; font-weight:bold;">${ans.myAns}</span> &nbsp;|&nbsp; <strong>기약분수 정답:</strong> <span style="color:#166534; font-weight:bold;">${ans.correctAns}</span><br>
+            • <strong>칭찬 한마디:</strong> ${ans.diagnosis}
           </div>
         `;
       } else {
         return `
-          <div class="wrong-note-card" style="margin-bottom:16px;">
-            <strong style="color:#b45309; font-size:18px;">❌ [${idx + 1}번 문제 - ${ans.typeName}] 정밀 오답 분석 및 해설</strong><br>
-            • <strong>출제 문제:</strong> ${ans.qShort}<br>
-            • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${ans.myAns}</span> &nbsp;|&nbsp; <strong>실제 정답:</strong> <span style="color:#166534; font-weight:bold;">${ans.correctAns}</span><br>
-            • <strong>🔍 내 오답 원인 진단:</strong> <span style="color:#b45309; font-weight:bold;">${ans.diagnosis}</span><br>
+          <div class="wrong-note-card" style="margin-bottom:16px; padding:16px;">
+            <strong style="color:#b45309; font-size:18px;">❌ [${idx + 1}번 문제 - ${ans.typeName}] 왜 틀렸을까요?</strong><br>
+            • <strong>문제:</strong> ${ans.qClean}<br>
+            • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${ans.myAns}</span> &nbsp;|&nbsp; <strong>바른 정답:</strong> <span style="color:#166534; font-weight:bold;">${ans.correctAns}</span><br>
+            • <strong>🔍 내가 틀린 까닭:</strong> <span style="color:#b45309; font-weight:bold;">${ans.diagnosis}</span><br>
             <div style="margin-top:10px; padding:12px 14px; background:#ffffff; border-radius:10px; border:1px solid #f59e0b; line-height:1.7;">
-              <strong style="color:#1e3a8a;">📖 단계별 정석 풀이 과정:</strong><br>
+              <strong style="color:#1e3a8a;">📖 차근차근 풀어 보기:</strong><br>
               ${ans.detailedSol}
             </div>
           </div>
@@ -771,19 +842,20 @@ function resetLessonTimer() {
     let bottomBtnHTML = '';
     if (state.wrongIndices.length === 0) {
       bottomBtnHTML = `
-        <div class="goal-box">🎉 와우! 3문제를 모두 스스로 맞혀 100점을 달성했어요! 보충 학습 없이 바로 5단계 마무리로 이동합니다!</div>
+        <div class="goal-box">🎉 와우! 3문제를 모두 맞혔어요! 보충 학습 없이 바로 5단계 마무리로 이동합니다!</div>
         <button class="btn" onclick="showStep5A()">5단계 오늘 공부 마무리로 이동하기 👉</button>
       `;
     } else {
       state.bRetryQueue = [...state.wrongIndices];
       bottomBtnHTML = `
-        <div class="goal-box">💪 틀린 문제(${state.wrongIndices.map(i => (i + 1) + '번').join(', ')})의 <strong>오답 원인과 정석 풀이 과정</strong>을 잘 읽어보았나요?<br>이제 4단계에서 <strong>유사한 쌍둥이 문제</strong>를 풀며 완전히 내 것으로 만들어 봅시다!</div>
+        <div class="goal-box">💪 틀린 문제(${state.wrongIndices.map(i => (i + 1) + '번').join(', ')})의 <strong>내가 틀린 까닭과 차근차근 풀어 보기</strong>를 끝까지 다 읽어보았나요?<br>이제 4단계에서 <strong>비슷한 쌍둥이 문제</strong>를 풀며 완전히 내 것으로 만들어 봅시다!</div>
         <button class="btn" onclick="showStep4Intro()">4단계: 틀린 유형 쌍둥이 문제 풀러 가기 👉</button>
       `;
     }
   
     document.getElementById('app-content').innerHTML = `
-      <h2>📊 3단계 실력 평가 채점 결과 및 정밀 오답 리뷰 (${state.score}점 / 100점)</h2>
+      <h2>📊 3단계 실력 확인 결과 (3문제 중 ${correctCount}개 정답 | ${state.score}점)</h2>
+      ${summaryBarHTML}
       ${reviewCardsHTML}
       ${bottomBtnHTML}
     `;
@@ -798,8 +870,8 @@ function resetLessonTimer() {
     document.getElementById('app-content').innerHTML = `
       <h2>4단계: 핵심 비법 보충 & 쌍둥이 문제 재도전</h2>
       <div class="goal-box">
-        3단계 평가에서 틀렸던 문제를 완벽히 이해하고 넘어가는 시간이에요!<br>
-        막히면 <strong>1단계 스몰 스텝 빈칸</strong>과 <strong>2단계 소크라테스 AI 선생님</strong>이 도와주며, 3번까지 어려우면 정석 풀이를 확인하고 다음으로 넘어갈 수 있어요.<br><br>
+        3단계에서 아쉬웠던 문제를 완벽히 이해하고 넘어가는 시간이에요!<br>
+        막히면 <strong>1단계 스몰 스텝 빈칸</strong>과 <strong>2단계 소크라테스 AI 선생님</strong>이 도와주며, 3번까지 어려우면 풀이를 확인하고 다음으로 넘어갈 수 있어요.<br><br>
         <strong>[오늘의 핵심 비법]</strong> ${state.lessonData.step4Intro}
       </div>
       <button class="btn" onclick="showNextStep4B()">쌍둥이 문제 재도전 시작하기 👉</button>
@@ -821,16 +893,16 @@ function resetLessonTimer() {
     const prevWrong = state.step3Answers && state.step3Answers[qIdx] ? state.step3Answers[qIdx] : null;
     const prevReviewBanner = prevWrong ? `
       <div class="wrong-note-card" style="margin-bottom:18px; background:#fff7ed; border-color:#fdba74;">
-        <strong>📌 [아까 3단계 ${qIdx + 1}번에서 틀렸던 내 기록 & 핵심 풀이]</strong><br>
-        • <strong>아까 틀린 답:</strong> <span style="color:#dc2626; font-weight:bold;">${prevWrong.myAns}</span> ➡️ <strong>정답:</strong> <span style="color:#166534; font-weight:bold;">${prevWrong.correctAns}</span><br>
-        • <strong>주의할 점:</strong> ${prevWrong.diagnosis}
+        <strong>📌 [아까 3단계 ${qIdx + 1}번에서 내가 틀린 까닭 돌아보기]</strong><br>
+        • <strong>아까 내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${prevWrong.myAns}</span> ➡️ <strong>바른 정답:</strong> <span style="color:#166534; font-weight:bold;">${prevWrong.correctAns}</span><br>
+        • <strong>내가 틀린 까닭:</strong> ${prevWrong.diagnosis}
       </div>
     ` : '';
   
     document.getElementById('app-content').innerHTML = `
-      <h2>쌍둥이 문제 재도전 (${qIdx + 1}번 유사 유형)</h2>
+      <h2>쌍둥이 문제 재도전 (${qIdx + 1}번 비슷한 문제)</h2>
       ${prevReviewBanner}
-      <div class="question-box">${state.currentItem.q}</div>
+      <div class="question-box">${cleanQuestionText(state.currentItem.q)}</div>
       ${getFractionHTML(`checkStep4B(${qIdx})`)}
       <button class="btn" id="b-submit-btn" onclick="checkStep4B(${qIdx})">정답 제출하기</button>
       <div id="feedback-box" class="feedback"></div>
@@ -852,7 +924,7 @@ function resetLessonTimer() {
     const fb = document.getElementById('feedback-box');
     const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
   
-    if (status === 'correct') {
+    if (status === 'correct' || status === 'unreduced') {
       const helperUsed = buildStep4HelperSummary();
       const passDetail = state.attempt === 1
         ? `${qIdx + 1}번 쌍둥이: 1차 시도에 도우미 없이 스스로 통과(⭕)`
@@ -861,7 +933,7 @@ function resetLessonTimer() {
       state.bResults.push(passDetail);
       state.bDetailedLogs.push({
         qNum: qIdx + 1,
-        twinQ: summarizeQuestionText(state.currentItem.q),
+        twinQ: cleanQuestionText(state.currentItem.q),
         correctAns: `${state.currentItem.num}/${state.currentItem.den}`,
         attempts: state.attempt,
         helperUsed: helperUsed,
@@ -870,11 +942,9 @@ function resetLessonTimer() {
   
       const submitBtn = document.getElementById('b-submit-btn');
       if (submitBtn) submitBtn.style.display = 'none';
+      const reduceTip = status === 'unreduced' ? `<br>💡 참고: 약분하면 기약분수 <strong>${state.currentItem.num}/${state.currentItem.den}</strong>으로도 쓸 수 있어요!` : '';
       fb.className = "feedback correct";
-      fb.innerHTML = `정답이에요! 원리를 완벽하게 이해하고 쌍둥이 문제를 내 것으로 만들었어요! (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)<br><br><button class="btn" onclick="showNextStep4B()">다음 단계로 이동 👉</button>`;
-    } else if (status === 'unreduced') {
-      fb.className = "feedback hint";
-      fb.innerText = "💡 계산은 맞았어요! 기약분수로 약분해서 다시 적어보세요! (오답 횟수에 포함되지 않아요)";
+      fb.innerHTML = `정답이에요! 원리를 완벽하게 이해하고 쌍둥이 문제를 내 것으로 만들었어요! (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)${reduceTip}<br><br><button class="btn" onclick="showNextStep4B()">다음 단계로 이동 👉</button>`;
     } else {
       if (state.attempt === 1) {
         fb.className = "feedback hint";
@@ -887,12 +957,12 @@ function resetLessonTimer() {
         activateSmallStepIfNeeded();
       } else {
         const helperUsed = buildStep4HelperSummary();
-        const failDetail = `${qIdx + 1}번 쌍둥이: 3회 오답으로 정석 풀이 확인 후 이동 [활용 도우미: ${helperUsed}] (⚠️ 추가 복습 필요)`;
+        const failDetail = `${qIdx + 1}번 쌍둥이: 3회 오답으로 풀이 확인 후 이동 [활용 도우미: ${helperUsed}] (⚠️ 추가 복습 필요)`;
         if (!state.bResults.some(r => r.startsWith(`${qIdx + 1}번`))) {
           state.bResults.push(failDetail);
           state.bDetailedLogs.push({
             qNum: qIdx + 1,
-            twinQ: summarizeQuestionText(state.currentItem.q),
+            twinQ: cleanQuestionText(state.currentItem.q),
             correctAns: `${state.currentItem.num}/${state.currentItem.den}`,
             attempts: 3,
             helperUsed: helperUsed,
@@ -904,11 +974,11 @@ function resetLessonTimer() {
   
         fb.className = "feedback hint";
         fb.innerHTML = `
-          💡 <strong>[3차 시도 완료 - 단계별 정석 풀이 확인하기]</strong><br>
+          💡 <strong>[3차 시도 완료 - 차근차근 풀어 보기]</strong><br>
           이번 문제가 조금 까다로웠죠? 끝까지 포기하지 않고 도전한 점을 칭찬해요! 👏<br>
           • <strong>정답:</strong> <span style="color:#166534; font-weight:bold;">${state.currentItem.num}/${state.currentItem.den}</span><br>
           <div style="margin:8px 0; padding:10px; background:#fff; border-radius:8px; border:1px solid #f59e0b;">
-            <strong>📖 정석 풀이 과정:</strong><br>${buildDetailedExplanation(state.currentItem)}
+            <strong>📖 차근차근 풀어 보기:</strong><br>${buildDetailedExplanation(state.currentItem)}
           </div>
           위 풀이 과정을 눈으로 꼭 익혀두고 다음 단계로 넘어가요! (이 기록은 완료 보고서에 상세히 저장됩니다)<br><br>
           <button class="btn" onclick="showNextStep4B()">풀이 확인 완료! 다음 단계로 이동하기 👉</button>
@@ -919,7 +989,7 @@ function resetLessonTimer() {
   }
   
   // ==========================================
-  // 🗣️ 6. 5단계 마무리 및 정밀 완료 보고서(소요 시간 포함)
+  // 🗣️ 6. 5단계 마무리 및 상세 완료 보고서(소요 시간 포함)
   // ==========================================
   function showStep5A() {
     switchStepTimer('step5');
@@ -995,13 +1065,13 @@ function resetLessonTimer() {
   
   function buildTeacherSynthesisComment(needHelp) {
     if (state.wrongIndices.length === 0) {
-      return "오늘 배운 핵심 개념을 완벽하게 이해하여 3단계 실력 평가의 모든 유형(기본 계산·오개념 잡기·실생활 문장제)을 첫 시도에 스스로 해결했습니다. 매우 훌륭합니다!";
+      return "오늘 배운 핵심 개념을 완벽하게 이해하여 3단계 실력 확인의 모든 문제를 첫 시도에 스스로 해결했습니다. 매우 훌륭합니다!";
     }
     const wrongTypes = state.wrongIndices.map(i => `${i + 1}번`).join(', ');
     if (!needHelp) {
-      return `3단계 평가의 ${wrongTypes} 문항에서 일시적인 오개념(분자·분모 위치 혼동 또는 식 세우기 착오)이 있었으나, 오답 리뷰와 4단계 쌍둥이 보충 학습을 통해 스스로 원리를 깨우치고 약점을 완벽하게 극복했습니다!`;
+      return `3단계 실력 확인의 ${wrongTypes} 문제에서 아쉬운 실수가 있었으나, '내가 틀린 까닭'을 확인하고 4단계 쌍둥이 보충 문제를 풀어보며 스스로 원리를 깨우치고 약점을 완벽하게 극복했습니다!`;
     }
-    return `3단계 평가(${wrongTypes} 문항)와 4단계 쌍둥이 보충 문제에서 다소 어려움을 겪어 정석 풀이를 확인하고 통과했습니다. 오늘 틀렸던 문항의 계산 원리를 한 번 더 복습해 보는 것을 권장합니다.`;
+    return `3단계(${wrongTypes} 문제)와 4단계 쌍둥이 보충 문제에서 다소 어려움을 겪어 풀이를 확인하고 통과했습니다. 오늘 틀렸던 문제의 계산 원리를 한 번 더 복습해 보는 것을 권장합니다.`;
   }
   
   async function showFinalReport() {
@@ -1014,29 +1084,30 @@ function resetLessonTimer() {
   
     const needHelp = state.bResults.some(r => r.includes("필요"));
     const finalState = needHelp ? "추가 복습 필요" : "완료";
+    const correctCnt = 3 - state.wrongIndices.length;
   
     await saveStudyRecord(state.unitKey, state.lessonId, state.score, finalState, {
       totalTime: totalTimeStr,
       stepTimes: st
     });
   
-    // 1. 3단계 문항별 정밀 분석 HTML
+    // 1. 3단계 문항별 결과 HTML
     const step3DetailHTML = [0, 1, 2].map(idx => {
       const a = state.step3Answers && state.step3Answers[idx];
       if (!a) return `<div style="margin-bottom:8px;">• ${idx + 1}번: 기록 없음</div>`;
       if (a.isCorrect) {
         return `
           <div style="margin-bottom:10px; padding:10px 12px; background:#f0fdf4; border-left:4px solid #22c55e; border-radius:6px;">
-            <strong>⭕ ${idx + 1}번 [${a.typeName}] — 정답</strong> (제출 답안: <b>${a.myAns}</b>)<br>
-            <span style="font-size:14px; color:#475569;">• 출제 문제: ${a.qShort}</span>
+            <strong>⭕ ${idx + 1}번 [${a.typeName}] — 맞음</strong> (내가 적은 답: <b>${a.myAns}</b>)<br>
+            <span style="font-size:14px; color:#475569;">• 문제: ${a.qClean}</span>
           </div>
         `;
       } else {
         return `
           <div style="margin-bottom:10px; padding:10px 12px; background:#fffbeb; border-left:4px solid #f59e0b; border-radius:6px;">
-            <strong>❌ ${idx + 1}번 [${a.typeName}] — 오답</strong> (내 답: <b style="color:#dc2626;">${a.myAns}</b> ➔ 정답: <b style="color:#166534;">${a.correctAns}</b>)<br>
-            <span style="font-size:14px; color:#475569;">• 출제 문제: ${a.qShort}</span><br>
-            <span style="font-size:14px; color:#b45309;">• <b>오답 원인 진단:</b> ${a.diagnosis}</span>
+            <strong>❌ ${idx + 1}번 [${a.typeName}] — 틀림</strong> (내가 적은 답: <b style="color:#dc2626;">${a.myAns}</b> ➔ 바른 정답: <b style="color:#166534;">${a.correctAns}</b>)<br>
+            <span style="font-size:14px; color:#475569;">• 문제: ${a.qClean}</span><br>
+            <span style="font-size:14px; color:#b45309;">• <b>내가 틀린 까닭:</b> ${a.diagnosis}</span>
           </div>
         `;
       }
@@ -1045,11 +1116,11 @@ function resetLessonTimer() {
     // 2. 4단계 쌍둥이 보충 상세 이력 HTML
     let step4DetailHTML = '';
     if (state.wrongIndices.length === 0) {
-      step4DetailHTML = `<div style="padding:10px 12px; background:#eff6ff; border-radius:8px; color:#1e40af;">🎉 3단계 실력 평가를 100점으로 통과하여 4단계 보충 학습 없이 바로 통과했습니다!</div>`;
+      step4DetailHTML = `<div style="padding:10px 12px; background:#eff6ff; border-radius:8px; color:#1e40af;">🎉 3단계 실력 확인 3문제를 모두 맞혀 보충 학습 없이 바로 통과했습니다!</div>`;
     } else {
       step4DetailHTML = (state.bDetailedLogs || []).map(log => `
         <div style="margin-bottom:8px; padding:10px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px;">
-          <strong>🔄 ${log.qNum}번 쌍둥이 보충:</strong> ${log.passed ? `<span style="color:#166534; font-weight:bold;">${log.attempts}차 시도 만에 완벽 통과 (⭕)</span>` : `<span style="color:#dc2626; font-weight:bold;">3회 오답 후 정석 풀이 학습 (⚠️ 복습 권장)</span>`}<br>
+          <strong>🔄 ${log.qNum}번 쌍둥이 보충:</strong> ${log.passed ? `<span style="color:#166534; font-weight:bold;">${log.attempts}차 시도 만에 완벽 통과 (⭕)</span>` : `<span style="color:#dc2626; font-weight:bold;">3회 오답 후 풀이 학습 (⚠️ 복습 권장)</span>`}<br>
           <span style="font-size:14px; color:#475569;">• 보충 문제: ${log.twinQ} (정답: ${log.correctAns})</span><br>
           <span style="font-size:14px; color:#0f766e;">• 학습 과정 및 도우미 활용: <b>${log.helperUsed}</b></span>
         </div>
@@ -1064,7 +1135,7 @@ function resetLessonTimer() {
             ${state.lessonData.warmup ? '<th>워밍업</th>' : ''}
             <th>1단계(개념)</th>
             <th>2단계(교과서)</th>
-            <th>3단계(실력평가)</th>
+            <th>3단계(실력확인)</th>
             <th>4단계(쌍둥이보충)</th>
             <th>5단계(정리·낭독)</th>
             <th style="background:#dbeafe; color:#1e3a8a;">전체 소요 시간</th>
@@ -1076,7 +1147,7 @@ function resetLessonTimer() {
             <td>${formatDuration(st.step1)}</td>
             <td>${formatDuration(st.step2)}</td>
             <td>${formatDuration(st.step3)}</td>
-            <td>${state.wrongIndices.length === 0 ? '면제(100점)' : formatDuration(st.step4)}</td>
+            <td>${state.wrongIndices.length === 0 ? '면제(모두 맞힘)' : formatDuration(st.step4)}</td>
             <td>${formatDuration(st.step5)}</td>
             <td style="font-weight:bold; color:#1d4ed8; background:#eff6ff;">⏱️ ${totalTimeStr}</td>
           </tr>
@@ -1091,33 +1162,33 @@ function resetLessonTimer() {
       : `<button class="btn" style="background:#d97706;" onclick="showLessonSelect(state.grade, state.semester, state.unit)">🏆 1단원 완주! [단원 최종 테스트] 보러 가기 👉</button>`;
   
     document.getElementById('app-content').innerHTML = `
-      <h2>📊 ${state.studentName} 학생의 완전학습 종합 진단 보고서 (☁️ 클라우드 저장됨)</h2>
+      <h2>📊 ${state.studentName} 학생의 완전학습 완료 보고서 (☁️ 클라우드 저장됨)</h2>
       <div class="report-card">
         <strong>👤 기본 학습 정보</strong><br>
         • <strong>학생 이름:</strong> ${state.studentName} (${state.studentGrade}학년 ${state.studentSem}학기)<br>
         • <strong>학습 차시:</strong> ${state.grade}학년 ${state.semester}학기 ${state.unit}단원 (${state.lessonData.title})<br>
-        • <strong>최종 판정:</strong> <span style="font-weight:bold; color:${needHelp ? '#dc2626' : '#166534'};">[ ${finalState} ]</span> &nbsp;|&nbsp; <strong>3단계 첫 실력 평가 점수:</strong> <span style="font-weight:bold; color:#2563eb;">${state.score}점 / 100점</span>
+        • <strong>최종 판정:</strong> <span style="font-weight:bold; color:${needHelp ? '#dc2626' : '#166534'};">[ ${finalState} ]</span> &nbsp;|&nbsp; <strong>3단계 실력 확인 결과:</strong> <span style="font-weight:bold; color:#2563eb;">3문제 중 ${correctCnt}개 정답 (${state.score}점)</span>
         
         <hr style="border:none; border-top:1px dashed #cbd5e1; margin:16px 0;">
         <strong>⏱️ 단계별 학습 소요 시간 (총 소요 시간: <span style="color:#2563eb;">${totalTimeStr}</span>)</strong>
         ${timeBreakdownHTML}
   
         <hr style="border:none; border-top:1px dashed #cbd5e1; margin:16px 0;">
-        <strong>📝 3단계 실력 평가 문항별 정밀 분석</strong>
+        <strong>📝 3단계 실력 확인 문제별 결과</strong>
         <div style="margin-top:8px;">${step3DetailHTML}</div>
   
         <hr style="border:none; border-top:1px dashed #cbd5e1; margin:16px 0;">
-        <strong>🔄 4단계 쌍둥이 보충 학습 상세 추적 기록</strong>
+        <strong>🔄 4단계 쌍둥이 보충 학습 기록</strong>
         <div style="margin-top:8px;">${step4DetailHTML}</div>
   
         <hr style="border:none; border-top:1px dashed #cbd5e1; margin:16px 0;">
-        <strong>👩‍🏫 AI 튜터 종합 학습 코멘트</strong>
+        <strong>👩‍🏫 선생님 총평</strong>
         <div style="margin-top:6px; padding:12px; background:#f0fdfa; border:1px solid #5eead4; border-radius:10px; color:#134e4a; font-size:15px;">
           "${teacherComment}"
         </div>
       </div>
       ${nextBtnHTML}
-      <button class="btn btn-share" onclick="copyReportForParent()">📋 학부모·선생님께 상세 진단서 보내기 (카톡용 복사)</button>
+      <button class="btn btn-share" onclick="copyReportForParent()">📋 학부모·선생님께 결과 보고서 보내기 (카톡용 복사)</button>
       <button class="btn btn-secondary" onclick="showLessonSelect(state.grade, state.semester, state.unit)">📋 차시 선택 목록으로 돌아가기 (도장 확인)</button>
     `;
   }
@@ -1128,35 +1199,36 @@ function resetLessonTimer() {
     const totalTimeStr = formatDuration(totalSec);
     const needHelp = state.bResults.some(r => r.includes("필요"));
     const finalState = needHelp ? "추가 복습 필요" : "완전학습 통과";
+    const correctCnt = 3 - state.wrongIndices.length;
   
     const step3Lines = [0, 1, 2].map(idx => {
       const a = state.step3Answers && state.step3Answers[idx];
       if (!a) return `  - ${idx + 1}번: 기록 없음`;
-      if (a.isCorrect) return `  - ${idx + 1}번(${a.typeName}): ⭕ 정답 (제출: ${a.myAns})`;
-      return `  - ${idx + 1}번(${a.typeName}): ❌ 오답 (내 답: ${a.myAns} → 정답: ${a.correctAns})\n    └ 원인: ${a.diagnosis}`;
+      if (a.isCorrect) return `  - ${idx + 1}번(${a.typeName}): ⭕ 맞음 (내가 적은 답: ${a.myAns})`;
+      return `  - ${idx + 1}번(${a.typeName}): ❌ 틀림 (내가 적은 답: ${a.myAns} → 정답: ${a.correctAns})\n    └ 내가 틀린 까닭: ${a.diagnosis}`;
     }).join('\n');
   
     const step4Lines = state.wrongIndices.length === 0
-      ? "  - 3단계 100점 통과로 보충 면제"
+      ? "  - 3단계 문제를 모두 맞혀 보충 면제"
       : (state.bDetailedLogs || []).map(l => `  - ${l.qNum}번 쌍둥이: ${l.passed ? `${l.attempts}차 시도 통과(⭕)` : '3회 오답 후 풀이 확인(⚠️)'} [과정: ${l.helperUsed}]`).join('\n');
   
     const timeLine = `1단계(${formatDuration(st.step1)}) / 2단계(${formatDuration(st.step2)}) / 3단계(${formatDuration(st.step3)}) / 4단계(${state.wrongIndices.length === 0 ? '면제' : formatDuration(st.step4)}) / 5단계(${formatDuration(st.step5)})`;
   
     const shareText = [
-      `[📚 ${state.studentName} 학생(${state.studentGrade}-${state.studentSem}) 초등 수학 완전학습 정밀 진단서]`,
+      `[📚 ${state.studentName} 학생(${state.studentGrade}-${state.studentSem}) 초등 수학 완전학습 보고서]`,
       `• 학습 일시: ${new Date().toLocaleString()}`,
       `• 학습 차시: ${state.grade}학년 ${state.semester}학기 ${state.lessonData.title}`,
       `• 전체 소요 시간: ⏱️ ${totalTimeStr}`,
       `  └ 단계별: ${timeLine}`,
-      `• 3단계 실력 평가 점수: ${state.score}점 / 100점`,
+      `• 3단계 실력 확인: 3문제 중 ${correctCnt}개 정답 (${state.score}점)`,
       step3Lines,
       `• 4단계 쌍둥이 보충 기록:`,
       step4Lines,
-      `• 종합 코멘트: ${buildTeacherSynthesisComment(needHelp)}`,
+      `• 선생님 총평: ${buildTeacherSynthesisComment(needHelp)}`,
       `• 최종 판정: [${finalState}]`
     ].join('\n');
   
-    navigator.clipboard.writeText(shareText).then(() => alert('✅ 상세 학습 진단서가 복사되었습니다! 카카오톡에 붙여넣기(Ctrl+V) 하세요.')).catch(() => prompt('복사(Ctrl+C)해서 전달하세요:', shareText));
+    navigator.clipboard.writeText(shareText).then(() => alert('✅ 학습 보고서가 복사되었습니다! 카카오톡에 붙여넣기(Ctrl+V) 하세요.')).catch(() => prompt('복사(Ctrl+C)해서 전달하세요:', shareText));
   }
   
   initApp();
