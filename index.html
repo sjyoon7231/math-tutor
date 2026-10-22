@@ -29,7 +29,6 @@
       align-items: flex-start;
       min-height: 100vh;
     }
-    /* 카드 상자 높이 제한 및 내부 스크롤을 제거하여 전체 화면이 시원하게 내려가도록 수정 */
     .card {
       background: var(--card-bg);
       width: 100%;
@@ -169,7 +168,6 @@
       white-space: pre-line;
       color: #0f172a;
     }
-    /* 유튜브 쇼츠(세로형 9:16) 영상이 잘리지 않고 가운데에 깔끔하게 나오도록 최적화 */
     .video-box {
       position: relative;
       width: 100%;
@@ -722,8 +720,8 @@
     </div>
   </div>
 
-  <!-- 분리된 4개 모듈 스크립트 순서대로 불러오기 -->
-  <script src="data.js"></script>
+  <!-- 분리된 모듈 스크립트 순서대로 불러오기 (단원 데이터는 자동 로드됨) -->
+  <script src="data/menu.js"></script>
   <script src="auth-cloud.js"></script>
   <script src="tutor-helper.js"></script>
   <script src="app.js"></script>
