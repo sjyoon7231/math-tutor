@@ -34,7 +34,6 @@ function resetLessonTimer() {
     return `${m}분 ${rem}초`;
   }
   
-  // 제목과 중복되는 [유형 1: ...] 꼬리표를 지워 깔끔한 문제 문장으로 만드는 함수
   function cleanQuestionText(rawQ) {
     return rawQ
       .replace(/^\[[^\]]+\]\s*/, '')
@@ -43,7 +42,22 @@ function resetLessonTimer() {
       .trim();
   }
   
-  // 학생이 적은 오답의 모양을 보고 구체적인 원인을 족집게처럼 짚어주는 함수
+  // 풀이 상자 펼치기 / 접기 토글 함수
+  function toggleSolutionBox(boxId, btnId) {
+    const box = document.getElementById(boxId);
+    const btn = document.getElementById(btnId);
+    if (!box || !btn) return;
+    if (box.style.display === 'none') {
+      box.style.display = 'block';
+      btn.innerHTML = '📖 차근차근 풀어 보기 닫기 ▲';
+      btn.style.background = '#fef3c7';
+    } else {
+      box.style.display = 'none';
+      btn.innerHTML = '📖 스스로 먼저 생각해 봤나요? 차근차근 풀어 보기 (눌러서 펼치기 ▼)';
+      btn.style.background = '#ffffff';
+    }
+  }
+  
   function diagnoseFractionError(item, wVal, nVal, dVal) {
     const w = parseInt(wVal || "0", 10);
     const n = parseInt(nVal, 10);
@@ -52,7 +66,6 @@ function resetLessonTimer() {
     const targetD = item.den;
     const studentTotalN = w * d + n;
   
-    // 1. 대분수 나눗셈 (예: 2와 2/5 ÷ 3)
     const mixedMatch = item.q.match(/(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
     if (mixedMatch) {
       const mw = parseInt(mixedMatch[1], 10);
@@ -70,33 +83,27 @@ function resetLessonTimer() {
       return `대분수 ${mw}과 ${mn}/${md}을 가분수 ${impN}/${md}로 바꾼 뒤 분모에 ${mc}를 곱하는 과정에서 작은 계산 실수가 있었어요.`;
     }
   
-    // 2. 진분수/가분수 ÷ 자연수 (예: 6/11 ÷ 2, 8/12 ÷ 4)
     const fracMatch = item.q.match(/(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
     if (fracMatch) {
       const fn = parseInt(fracMatch[1], 10);
       const fd = parseInt(fracMatch[2], 10);
       const fc = parseInt(fracMatch[3], 10);
   
-      // (1) 문제의 분수를 그대로 옮겨 적은 경우 (예: 6/11 ÷ 2 -> 6/11, 또는 8/12 ÷ 4 -> 2/3)
       if (studentTotalN === fn && d === fd) {
         return `문제에 있는 분수 ${fn}/${fd}를 그대로 옮겨 적었어요! 나누기 ${fc}를 아직 계산하지 않았습니다.`;
       }
       if (studentTotalN * fd === fn * d) {
         return `분자와 분모를 모두 ${fc}로 나누어 ${studentTotalN}/${d}이라고 적었네요! 분자와 분모를 같은 수로 나누면 '약분'만 한 셈이 되어 원래 분수(${fn}/${fd})와 크기가 똑같아져요. 분모 ${fd}는 나누지 말고 그대로 두어야 합니다!`;
       }
-      // (2) 나누지 않고 거꾸로 곱한 경우 (예: 6/11 ÷ 2 -> 12/11)
       if (studentTotalN === fn * fc && d === fd) {
         return `나누기 ${fc}를 해야 하는데 거꾸로 분자에 ${fc}를 곱해서 ${studentTotalN}/${d}이라고 적었어요! (÷ ${fc})는 분자를 ${fc}로 나누거나 분모에 ${fc}를 곱해야 합니다.`;
       }
-      // (3) 분자도 나누고 분모에도 곱해버린 경우 (예: 6/11 ÷ 2 -> 3/22)
       if (fn % fc === 0 && studentTotalN === fn / fc && d === fd * fc) {
         return `분자도 ${fc}로 나누고(${fn}÷${fc}=${studentTotalN}), 분모에도 ${fc}를 곱해서(${fd}×${fc}=${d}) 나누기를 두 번이나 계산했어요! 둘 중 한 가지 방법으로만 계산해야 합니다.`;
       }
-      // (4) 분모만 나눈 경우 (예: 8/12 ÷ 4 -> 8/3)
       if (fd % fc === 0 && studentTotalN === fn && d === fd / fc) {
         return `분모(${fd})를 ${fc}로 나누어 ${studentTotalN}/${d}이라고 적었네요! 분모가 아니라 분자(${fn})를 ${fc}로 나누거나 분모에 ${fc}를 곱해야 합니다.`;
       }
-      // (5) 분자와 분모를 위아래 반대로 적은 경우
       if (studentTotalN * targetN === d * targetD) {
         return `계산한 숫자는 맞았지만 분자(위)와 분모(아래)의 위치를 위아래 거꾸로 적었어요!`;
       }
@@ -106,7 +113,6 @@ function resetLessonTimer() {
       return `분수 ${fn}/${fd}를 ${fc}로 나눌 때는 분자를 ${fc}로 나누거나, 분모 ${fd}에 ${fc}를 곱해서 계산해야 합니다.`;
     }
   
-    // 3. 자연수 ÷ 자연수 또는 문장제 (예: 7 ÷ 9 -> 9/7, 물 5L를 2통에 -> 2/5)
     if (studentTotalN * targetN === d * targetD) {
       if (item.q.includes('유형 3') || item.q.includes('똑같이 나누어') || item.q.includes('한 ')) {
         return `문장제 문제에서 '전체 양(${targetN})'과 '나누는 수(${targetD})'의 순서를 반대로 세웠어요! 전체 양 ${targetN}을 ${targetD}로 나누어야 하므로 분자에 ${targetN}, 분모에 ${targetD}를 적어야 합니다.`;
@@ -117,7 +123,6 @@ function resetLessonTimer() {
     return `나눗셈 식을 세우거나 분수로 바꾸는 과정에서 분자(${targetN}) 또는 분모(${targetD})의 숫자를 다시 확인해 보세요!`;
   }
   
-  // 초등학생 눈높이 용어와 '④ 거꾸로 확인하기(검산)'가 포함된 4단계 풀이 생성기
   function buildDetailedExplanation(item) {
     const mixedMatch = item.q.match(/(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)/);
     if (mixedMatch) {
@@ -470,14 +475,17 @@ function resetLessonTimer() {
   
     const wrongNotesHTML = state.examWrongList.length === 0
       ? `<div class="goal-box">🎉 완벽합니다, ${state.studentName} 학생! 5문제를 모두 맞혀 1단원 분수의 나눗셈을 마스터했습니다!</div>`
-      : `<h3>📓 ${state.studentName} 학생의 오답 노트</h3>` + state.examWrongList.map(w => `
+      : `<h3>📓 ${state.studentName} 학생의 오답 노트</h3>` + state.examWrongList.map((w, i) => `
         <div class="wrong-note-card">
           <strong>❌ [${w.qNum}번 문제 왜 틀렸을까요?] (${w.lessonCode}차시)</strong><br>
           • <strong>문제:</strong> ${cleanQuestionText(w.q)}<br>
-          • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${w.myAns}</span> | <strong>실제 정답:</strong> <span style="color:#166534; font-weight:bold;">${w.correctAns}</span><br>
+          • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${w.myAns}</span> | <strong>바른 정답:</strong> <span style="color:#166534; font-weight:bold;">${w.correctAns}</span><br>
           • <strong>🔍 내가 틀린 까닭:</strong> <span style="color:#b45309; font-weight:bold;">${w.diag}</span><br>
-          <div style="margin-top:8px; padding:10px; background:#ffffff; border-radius:8px; border:1px solid #fcd34d;">
-            <strong>📖 차근차근 풀어 보기:</strong><br>${w.sol}
+          <button type="button" id="exam-sol-btn-${i}" onclick="toggleSolutionBox('exam-sol-box-${i}', 'exam-sol-btn-${i}')" style="margin-top:10px; width:100%; padding:10px 14px; border-radius:10px; border:2px dashed #f59e0b; background:#ffffff; color:#92400e; font-size:15px; font-weight:bold; cursor:pointer;">
+            📖 스스로 먼저 생각해 봤나요? 차근차근 풀어 보기 (눌러서 펼치기 ▼)
+          </button>
+          <div id="exam-sol-box-${i}" style="display:none; margin-top:8px; padding:12px 14px; background:#ffffff; border-radius:10px; border:1px solid #fcd34d; line-height:1.7;">
+            <strong style="color:#1e3a8a;">📖 차근차근 풀어 보기:</strong><br>${w.sol}
           </div>
         </div>`).join('');
   
@@ -589,7 +597,7 @@ function resetLessonTimer() {
     updateLessonHeader("1단계: 개념 영상");
     const cleanUrl = getCleanYoutubeEmbedUrl(state.lessonData.videoUrl);
     const mediaHTML = cleanUrl
-      ? `<div class="video-box"><div class="yt-shield-top"></div><div class="yt-shield-bottom"></div><iframe src="${cleanUrl}" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><div class="video-notice">💡 영상 가운데를 눌러 재생하세요!</div>`
+      ? `<div class="video-box"><div class="yt-shield-top"></div><div class="yt-shield-bottom"></div><iframe src="${cleanUrl}" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><div class="video-notice">💡 영상 가운데를 눌러 재생하세요!</div>`
       : `<div class="summary-card">${state.lessonData.summaryCard}</div>`;
     const btnText = cleanUrl ? "영상을 끝까지 다 봤어요! (개념 퀴즈 풀기) 👉" : "핵심 약속 3가지를 다 읽었어요! (종합 퀴즈 풀기) 👉";
     document.getElementById('app-content').innerHTML = `
@@ -708,7 +716,7 @@ function resetLessonTimer() {
   }
   
   // ==========================================
-  // 📝 4. 3단계: 블라인드 실력 평가 & 어린이 눈높이 리뷰
+  // 📝 4. 3단계: 블라인드 실력 평가 & 펼치기 방식 리뷰
   // ==========================================
   function showStep3(idx) {
     switchStepTimer('step3');
@@ -750,7 +758,6 @@ function resetLessonTimer() {
   
     const item = state.currentItem;
     const status = checkFractionStatus(item.num, item.den);
-    // 크기가 같은 분수(unreduced)도 모두 정답으로 인정!
     const isRight = (status === 'correct' || status === 'unreduced');
     const myAnsStr = (wVal ? `${wVal}과 ` : '') + `${nVal}/${dVal}`;
     const typeNames = ["유형 1: 기본 계산", "유형 2: 오개념 바로잡기", "유형 3: 실생활 활용"];
@@ -799,7 +806,6 @@ function resetLessonTimer() {
       }
     });
   
-    // 문항별 차등 배점 없이 맞힌 개수 비례 점수 (0점, 33점, 67점, 100점)
     state.score = Math.round((correctCount / 3) * 100);
     updateLessonHeader("3단계: 실력 확인 결과");
   
@@ -807,7 +813,7 @@ function resetLessonTimer() {
       <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
         ${state.step3Answers.map((a, i) => `
           <span style="padding:6px 12px; border-radius:999px; font-weight:bold; font-size:14px; background:${a.isCorrect ? '#dcfce7' : '#fee2e2'}; color:${a.isCorrect ? '#166534' : '#991b1b'};">
-            ${i + 1}번(${a.typeName.split(':')[0]}): ${a.isCorrect ? `⭕ 맞음 (${a.myAns})` : `❌ 틀림 (내 답: ${a.myAns})`}
+            ${i + 1}번(${a.typeName.split(':')[0]}):${a.isCorrect ? `⭕ 맞음 (${a.myAns})` : `❌ 틀림 (내 답: ${a.myAns})`}
           </span>
         `).join('')}
       </div>
@@ -828,10 +834,13 @@ function resetLessonTimer() {
           <div class="wrong-note-card" style="margin-bottom:16px; padding:16px;">
             <strong style="color:#b45309; font-size:18px;">❌ [${idx + 1}번 문제 - ${ans.typeName}] 왜 틀렸을까요?</strong><br>
             • <strong>문제:</strong> ${ans.qClean}<br>
-            • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${ans.myAns}</span> &nbsp;|&nbsp; <strong>바른 정답:</strong> <span style="color:#166534; font-weight:bold;">${ans.correctAns}</span><br>
+            • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${ans.myAns}</span><br>
             • <strong>🔍 내가 틀린 까닭:</strong> <span style="color:#b45309; font-weight:bold;">${ans.diagnosis}</span><br>
-            <div style="margin-top:10px; padding:12px 14px; background:#ffffff; border-radius:10px; border:1px solid #f59e0b; line-height:1.7;">
-              <strong style="color:#1e3a8a;">📖 차근차근 풀어 보기:</strong><br>
+            <button type="button" id="step3-sol-btn-${idx}" onclick="toggleSolutionBox('step3-sol-box-${idx}', 'step3-sol-btn-${idx}')" style="margin-top:10px; width:100%; padding:11px 14px; border-radius:10px; border:2px dashed #f59e0b; background:#ffffff; color:#92400e; font-size:15px; font-weight:bold; cursor:pointer; transition:0.15s;">
+              📖 스스로 먼저 생각해 봤나요? 차근차근 풀어 보기 (눌러서 펼치기 ▼)
+            </button>
+            <div id="step3-sol-box-${idx}" style="display:none; margin-top:10px; padding:12px 14px; background:#ffffff; border-radius:10px; border:1px solid #f59e0b; line-height:1.7;">
+              <strong style="color:#1e3a8a;">📖 차근차근 풀어 보기 (바른 정답: <span style="color:#166534;">${ans.correctAns}</span>)</strong><br>
               ${ans.detailedSol}
             </div>
           </div>
@@ -848,7 +857,7 @@ function resetLessonTimer() {
     } else {
       state.bRetryQueue = [...state.wrongIndices];
       bottomBtnHTML = `
-        <div class="goal-box">💪 틀린 문제(${state.wrongIndices.map(i => (i + 1) + '번').join(', ')})의 <strong>내가 틀린 까닭과 차근차근 풀어 보기</strong>를 끝까지 다 읽어보았나요?<br>이제 4단계에서 <strong>비슷한 쌍둥이 문제</strong>를 풀며 완전히 내 것으로 만들어 봅시다!</div>
+        <div class="goal-box">💪 틀린 문제(${state.wrongIndices.map(i => (i + 1) + '번').join(', ')})의 <strong>내가 틀린 까닭</strong>을 읽고 <strong>[차근차근 풀어 보기]</strong>도 펼쳐서 확인해 보았나요?<br>이제 4단계에서 <strong>비슷한 쌍둥이 문제</strong>를 풀며 완전히 내 것으로 만들어 봅시다!</div>
         <button class="btn" onclick="showStep4Intro()">4단계: 틀린 유형 쌍둥이 문제 풀러 가기 👉</button>
       `;
     }
@@ -1091,7 +1100,6 @@ function resetLessonTimer() {
       stepTimes: st
     });
   
-    // 1. 3단계 문항별 결과 HTML
     const step3DetailHTML = [0, 1, 2].map(idx => {
       const a = state.step3Answers && state.step3Answers[idx];
       if (!a) return `<div style="margin-bottom:8px;">• ${idx + 1}번: 기록 없음</div>`;
@@ -1113,7 +1121,6 @@ function resetLessonTimer() {
       }
     }).join('');
   
-    // 2. 4단계 쌍둥이 보충 상세 이력 HTML
     let step4DetailHTML = '';
     if (state.wrongIndices.length === 0) {
       step4DetailHTML = `<div style="padding:10px 12px; background:#eff6ff; border-radius:8px; color:#1e40af;">🎉 3단계 실력 확인 3문제를 모두 맞혀 보충 학습 없이 바로 통과했습니다!</div>`;
@@ -1127,7 +1134,6 @@ function resetLessonTimer() {
       `).join('');
     }
   
-    // 3. 단계별 소요 시간 표 HTML
     const timeBreakdownHTML = `
       <table class="cloud-table" style="margin-top:8px; margin-bottom:14px;">
         <thead>
