@@ -286,6 +286,7 @@ async function initApp() {
     state.lessonId = lessonId;
     state.lessonData = MATH_DB.lessons[state.unitKey].items[lessonId];
     state.records = ['➖', '➖', '➖'];
+    state.step3Answers = [];
     state.score = 0;
     state.wrongIndices = [];
     state.bRetryQueue = [];
@@ -345,7 +346,6 @@ async function initApp() {
     `;
   }
   
-  // 3번째에 정답을 공짜로 알려주지 않고 스몰 스텝 -> AI 선생님으로 유도
   function checkWarmup() {
     const fb = document.getElementById('feedback-box');
     const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
@@ -489,84 +489,143 @@ async function initApp() {
     }
   }
   
+  // ==========================================
+  // 📝 3단계: 블라인드 실력 평가 (정·오답 표시 없이 1~3번 연속 제출)
+  // ==========================================
   function showStep3(idx) {
+    if (idx === 0) {
+      state.step3Answers = [];
+      state.records = ['➖', '➖', '➖'];
+      state.score = 0;
+      state.wrongIndices = [];
+    }
     state.attempt = 1;
     state.currentItem = pick(state.lessonData.step3A[idx]);
-    state.currentCheckFn = () => checkStep3(idx);
-    updateLessonHeader(`3단계: 실력 평가 (${idx + 1}/3)`);
+    state.currentCheckFn = () => submitStep3Blind(idx);
+  
+    document.getElementById('step-badge').innerText = `${state.lessonId}차시 | 3단계: 실력 평가 (${idx + 1}/3)`;
+    document.getElementById('score-board').innerText = `실력 평가 진행 중 (${idx + 1} / 3번 문항 | 3문제를 다 풀면 결과를 확인해요!)`;
+    setBreadcrumb(`${state.grade}학년 > ${state.semester}학기 > ${state.unit}단원 > ${state.lessonId}차시 (3단계 실력 평가 ${idx + 1}번)`);
+  
+    const btnLabel = idx < 2 ? `답안 제출하고 다음 문제(${idx + 2}번)로 이동 👉` : `3문제 모두 제출하고 채점 결과 및 리뷰 보기 👉`;
   
     document.getElementById('app-content').innerHTML = `
-      <h2>3단계 실력 평가 (A형 ${idx + 1}번)</h2>
-      <div class="goal-box">📝 <strong>실력 평가 시간입니다!</strong> 이 단계에서는 스몰 스텝과 AI 선생님의 도움 없이 스스로의 힘으로 문제를 풀어보세요.</div>
+      <h2>📝 3단계 실력 평가 (A형 ${idx + 1}번 / 총 3문항)</h2>
+      <div class="goal-box"><strong>실력 평가 시간입니다!</strong> 정·오답은 바로 알려주지 않으며, 3문제를 끝까지 다 풀고 난 뒤에 한꺼번에 채점하고 리뷰합니다. (기약분수로 적어주세요!)</div>
       <div class="question-box">${state.currentItem.q}</div>
-      ${getFractionHTML(`checkStep3(${idx})`)}
-      <button class="btn" id="submit-btn" onclick="checkStep3(${idx})">정답 제출하기</button>
-      <div id="feedback-box" class="feedback"></div>
+      ${getFractionHTML(`submitStep3Blind(${idx})`)}
+      <button class="btn" id="submit-btn" onclick="submitStep3Blind(${idx})">${btnLabel}</button>
     `;
   }
   
-  function checkStep3(idx) {
-    const fb = document.getElementById('feedback-box');
-    const weights = [30, 30, 40];
-    const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
+  function submitStep3Blind(idx) {
+    const wVal = document.getElementById('frac-w').value.trim();
+    const nVal = document.getElementById('frac-n').value.trim();
+    const dVal = document.getElementById('frac-d').value.trim();
   
-    if (status === 'correct') {
-      let resultNote = '';
-      if (state.attempt === 1) {
+    if (!nVal || !dVal) {
+      alert('분자와 분모 칸에 숫자를 입력해 주세요!');
+      return;
+    }
+  
+    const item = state.currentItem;
+    const status = checkFractionStatus(item.num, item.den);
+    const myAnsStr = (wVal ? `${wVal}과 ` : '') + `${nVal}/${dVal}` + (status === 'unreduced' ? ' (약분 안 함)' : '');
+  
+    state.step3Answers[idx] = {
+      idx: idx,
+      q: item.q,
+      myAns: myAnsStr,
+      correctAns: `${item.num}/${item.den}`,
+      isCorrect: (status === 'correct'),
+      status: status,
+      explanation: item.h2
+    };
+  
+    if (idx < 2) {
+      showStep3(idx + 1);
+    } else {
+      finalizeStep3AndShowReview();
+    }
+  }
+  
+  // ==========================================
+  // 📊 3단계 결과 리뷰 화면 (맞은 문제와 틀린 문제 설명 확인)
+  // ==========================================
+  function finalizeStep3AndShowReview() {
+    const weights = [30, 30, 40];
+    state.score = 0;
+    state.wrongIndices = [];
+  
+    state.step3Answers.forEach((ans, idx) => {
+      if (ans.isCorrect) {
         state.records[idx] = '⭕';
         state.score += weights[idx];
-        resultNote = '(첫 시도에 스스로의 힘으로 맞혔어요! 👍)';
       } else {
         state.records[idx] = '❌';
-        if (!state.wrongIndices.includes(idx)) state.wrongIndices.push(idx);
-        resultNote = '(힌트를 보고 해결했어요! 4단계에서 쌍둥이 문제와 AI 선생님으로 완벽히 다져볼게요!)';
+        state.wrongIndices.push(idx);
       }
-      updateLessonHeader(`3단계: 실력 평가 (${idx + 1}/3)`);
-      const submitBtn = document.getElementById('submit-btn');
-      if (submitBtn) submitBtn.style.display = 'none';
-      const nextAction = idx < 2 ? `showStep3(${idx + 1})` : `routeAfterStep3()`;
-      const nextLabel = idx < 2 ? `다음 문제(${idx + 2}번) 풀기 👉` : `평가 결과 확인하기 👉`;
-      fb.className = "feedback correct";
-      fb.innerHTML = `정답이에요! (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)<br>${resultNote}<br><br><button class="btn" onclick="${nextAction}">${nextLabel}</button>`;
-    } else if (status === 'unreduced') {
-      fb.className = "feedback hint";
-      fb.innerText = "💡 계산은 정확하게 잘했어요! 하지만 기약분수로 약분해서 다시 입력해 보세요! (감점되지 않아요!)";
+    });
+  
+    updateLessonHeader("3단계: 실력 평가 결과 리뷰");
+  
+    const reviewCardsHTML = state.step3Answers.map((ans, idx) => {
+      if (ans.isCorrect) {
+        return `
+          <div class="report-card" style="border-color:#22c55e; background:#f0fdf4; margin-bottom:14px;">
+            <strong style="color:#166534; font-size:18px;">⭕ [${idx + 1}번 문제] 정답입니다! (+${weights[idx]}점)</strong><br>
+            • <strong>문제:</strong> ${ans.q.replace(/\n/g, ' ')}<br>
+            • <strong>내가 적은 답:</strong> <span style="color:#166534; font-weight:bold;">${ans.myAns}</span> (정답과 일치 👍)
+          </div>
+        `;
+      } else {
+        const reasonNote = ans.status === 'unreduced'
+          ? '계산 값은 맞았지만 더 이상 나누어지지 않는 기약분수로 약분하지 않아 아쉽게 틀렸어요!'
+          : '아래 왜 틀렸는지 핵심 풀이를 읽고, 잠시 후 4단계에서 쌍둥이 문제로 완벽히 이해해 볼까요?';
+        return `
+          <div class="wrong-note-card" style="margin-bottom:14px;">
+            <strong style="color:#b45309; font-size:18px;">❌ [${idx + 1}번 문제] 아쉬워요! 왜 틀렸는지 함께 확인해 볼까요?</strong><br>
+            • <strong>문제:</strong> ${ans.q.replace(/\n/g, ' ')}<br>
+            • <strong>내가 적은 답:</strong> <span style="color:#dc2626; font-weight:bold;">${ans.myAns}</span> &nbsp;|&nbsp; <strong>실제 정답:</strong> <span style="color:#166534; font-weight:bold;">${ans.correctAns}</span><br>
+            • <strong>왜 틀렸을까요? (핵심 설명):</strong> ${ans.explanation}<br>
+            <span style="font-size:14px; color:#92400e;">💡 ${reasonNote}</span>
+          </div>
+        `;
+      }
+    }).join('');
+  
+    let bottomBtnHTML = '';
+    if (state.wrongIndices.length === 0) {
+      bottomBtnHTML = `
+        <div class="goal-box">🎉 와우! 3문제를 모두 스스로 맞혀 100점을 달성했어요! 보충 학습 없이 바로 5단계 마무리로 이동합니다!</div>
+        <button class="btn" onclick="showStep5A()">5단계 오늘 공부 마무리로 이동하기 👉</button>
+      `;
     } else {
-      if (state.attempt === 1) {
-        state.records[idx] = '❌';
-        if (!state.wrongIndices.includes(idx)) state.wrongIndices.push(idx);
-        updateLessonHeader(`3단계: 실력 평가 (${idx + 1}/3)`);
-      }
-      fb.className = "feedback hint";
-      if (state.attempt === 1) fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
-      else if (state.attempt === 2) fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}`;
-      else {
-        const nextAction = idx < 2 ? `showStep3(${idx + 1})` : `routeAfterStep3()`;
-        const nextLabel = idx < 2 ? `다음 문제(${idx + 2}번)로 이동 👉` : `4단계 보충 학습으로 이동 👉`;
-        const submitBtn = document.getElementById('submit-btn');
-        if (submitBtn) submitBtn.style.display = 'none';
-        fb.innerHTML = `💡 <strong>정석 풀이:</strong> ${state.currentItem.h2}<br>정답은 <strong>${state.currentItem.num}/${state.currentItem.den}</strong>입니다. 4단계에서 스몰 스텝과 AI 선생님과 함께 쌍둥이 문제로 다시 정복해 봅시다!<br><br><button class="btn" onclick="${nextAction}">${nextLabel}</button>`;
-      }
-      state.attempt++;
-    }
-  }
-  
-  function routeAfterStep3() {
-    if (state.wrongIndices.length === 0) showStep5A();
-    else {
       state.bRetryQueue = [...state.wrongIndices];
-      showStep4Intro();
+      bottomBtnHTML = `
+        <div class="goal-box">💪 틀린 문제(${state.wrongIndices.map(i => (i + 1) + '번').join(', ')})의 설명을 잘 읽어보았나요?<br>이제 4단계에서 <strong>유사한 쌍둥이 문제</strong>를 풀며 완전히 내 것으로 만들어 봅시다!</div>
+        <button class="btn" onclick="showStep4Intro()">4단계: 틀린 유형 쌍둥이 문제 풀러 가기 👉</button>
+      `;
     }
+  
+    document.getElementById('app-content').innerHTML = `
+      <h2>📊 3단계 실력 평가 채점 결과 및 오답 리뷰 (${state.score}점 / 100점)</h2>
+      ${reviewCardsHTML}
+      ${bottomBtnHTML}
+    `;
   }
   
+  // ==========================================
+  // 🔄 4단계: 틀린 문제 기반 쌍둥이 문제 보충 (최대 3회 오답 시 통과)
+  // ==========================================
   function showStep4Intro() {
     updateLessonHeader("4단계: 보충 및 쌍둥이 문제");
     document.getElementById('app-content').innerHTML = `
       <h2>4단계: 핵심 비법 보충 & 쌍둥이 문제 재도전</h2>
       <div class="goal-box">
-        3단계 평가에서 아쉬웠던 문제를 완벽히 내 것으로 만드는 시간이에요!<br>
-        4단계에서는 막힐 때 <strong>1단계 스몰 스텝 빈칸</strong>과 <strong>2단계 소크라테스 AI 선생님</strong>이 차례대로 도와주니 끝까지 내 힘으로 풀어보세요!<br><br>
-        <strong>[핵심 비법]</strong> ${state.lessonData.step4Intro}
+        3단계 평가에서 틀렸던 문제를 완벽히 이해하고 넘어가는 시간이에요!<br>
+        막히면 <strong>1단계 스몰 스텝 빈칸</strong>과 <strong>2단계 소크라테스 AI 선생님</strong>이 도와주며, 3번까지 어려우면 정석 풀이를 확인하고 다음으로 넘어갈 수 있어요.<br><br>
+        <strong>[오늘의 핵심 비법]</strong> ${state.lessonData.step4Intro}
       </div>
       <button class="btn" onclick="showNextStep4B()">쌍둥이 문제 재도전 시작하기 👉</button>
     `;
@@ -582,8 +641,20 @@ async function initApp() {
     state.currentItem = pick(state.lessonData.step4B[qIdx]);
     state.currentCheckFn = () => checkStep4B(qIdx);
     updateLessonHeader(`4단계: 쌍둥이 문제 B-${qIdx + 1}번`);
+  
+    const prevWrong = state.step3Answers && state.step3Answers[qIdx] ? state.step3Answers[qIdx] : null;
+    const prevReviewBanner = prevWrong ? `
+      <div class="wrong-note-card" style="margin-bottom:18px; background:#fff7ed; border-color:#fdba74;">
+        <strong>📌 [아까 3단계 ${qIdx + 1}번에서 틀렸던 내 기록 돌아보기]</strong><br>
+        • <strong>아까 문제:</strong> ${prevWrong.q.replace(/\n/g, ' ')}<br>
+        • <strong>내 오답:</strong> <span style="color:#dc2626; font-weight:bold;">${prevWrong.myAns}</span> ➡️ <strong>정답:</strong> <span style="color:#166534; font-weight:bold;">${prevWrong.correctAns}</span><br>
+        • <strong>기억할 원리:</strong> ${prevWrong.explanation}
+      </div>
+    ` : '';
+  
     document.getElementById('app-content').innerHTML = `
-      <h2>쌍둥이 문제 재도전 (${qIdx + 1}번 유형)</h2>
+      <h2>쌍둥이 문제 재도전 (${qIdx + 1}번 유사 유형)</h2>
+      ${prevReviewBanner}
       <div class="question-box">${state.currentItem.q}</div>
       ${getFractionHTML(`checkStep4B(${qIdx})`)}
       <button class="btn" id="b-submit-btn" onclick="checkStep4B(${qIdx})">정답 제출하기</button>
@@ -593,31 +664,53 @@ async function initApp() {
     `;
   }
   
-  // 4단계 쌍둥이 문제도 정답을 그냥 알려주지 않고 스몰 스텝 -> AI 선생님으로 끝까지 해결하게 함
+  // 4단계: 1차 힌트 -> 2차 스몰 스텝 & AI -> 3차 시도 실패 시 무한 루프 방지(풀이 공개 후 이동 & 상세 기록)
   function checkStep4B(qIdx) {
     const fb = document.getElementById('feedback-box');
     const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
+  
     if (status === 'correct') {
-      if (!state.bResults.some(r => r.startsWith(`${qIdx + 1}번`))) {
-        state.bResults.push(`${qIdx + 1}번 재도전 통과 완료`);
-      }
+      const passDetail = state.attempt === 1
+        ? `${qIdx + 1}번 쌍둥이: 1차 시도에 스스로 통과(⭕)`
+        : `${qIdx + 1}번 쌍둥이: ${state.attempt}차 시도에 도우미 학습 후 통과(⭕)`;
+      state.bResults.push(passDetail);
+  
       const submitBtn = document.getElementById('b-submit-btn');
       if (submitBtn) submitBtn.style.display = 'none';
       fb.className = "feedback correct";
-      fb.innerHTML = `정답이에요! 쌍둥이 문제를 완벽하게 내 것으로 만들었어요! (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)<br><br><button class="btn" onclick="showNextStep4B()">다음 단계로 이동 👉</button>`;
+      fb.innerHTML = `정답이에요! 원리를 완벽하게 이해하고 쌍둥이 문제를 내 것으로 만들었어요! (정답: <strong>${state.currentItem.num}/${state.currentItem.den}</strong>)<br><br><button class="btn" onclick="showNextStep4B()">다음 단계로 이동 👉</button>`;
     } else if (status === 'unreduced') {
       fb.className = "feedback hint";
-      fb.innerText = "💡 계산은 맞았어요! 기약분수로 약분해서 다시 적어보세요!";
+      fb.innerText = "💡 계산은 맞았어요! 기약분수로 약분해서 다시 적어보세요! (오답 횟수에 포함되지 않아요)";
     } else {
       if (state.attempt === 1) {
         fb.className = "feedback hint";
-        fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
+        fb.innerText = `💡 [1/3차 시도] 1차 힌트: ${state.currentItem.h1}`;
         state.attempt++;
-      } else {
+      } else if (state.attempt === 2) {
         fb.className = "feedback hint";
-        fb.innerText = `💡 혼자 풀기 어렵나요? 아래에 열린 [1단계 도우미: 스몰 스텝 빈칸]을 하나씩 채워보세요! (빈칸도 틀리면 AI 선생님이 나와서 도와줍니다!)`;
+        fb.innerText = `💡 [2/3차 시도] 아래에 열린 [1단계 도우미: 스몰 스텝 빈칸]을 하나씩 채워보세요! (빈칸도 틀리면 AI 선생님이 나와서 도와줍니다!)`;
         state.attempt++;
         activateSmallStepIfNeeded();
+      } else {
+        // 3번 연속 틀렸을 때 무한 루프 방지: 정석 풀이를 보여주고 기록을 남긴 뒤 다음으로 넘어가기 허용
+        const failDetail = `${qIdx + 1}번 쌍둥이: 3회 오답으로 정석 풀이 확인 후 이동(⚠️ 추가 복습 필요)`;
+        if (!state.bResults.some(r => r.startsWith(`${qIdx + 1}번`))) {
+          state.bResults.push(failDetail);
+        }
+        const submitBtn = document.getElementById('b-submit-btn');
+        if (submitBtn) submitBtn.style.display = 'none';
+  
+        fb.className = "feedback hint";
+        fb.innerHTML = `
+          💡 <strong>[3차 시도 완료 - 정석 풀이 확인하기]</strong><br>
+          이번 문제가 조금 까다로웠죠? 끝까지 도전한 것만으로도 정말 칭찬해요! 👏<br>
+          • <strong>정답:</strong> <span style="color:#166534; font-weight:bold;">${state.currentItem.num}/${state.currentItem.den}</span><br>
+          • <strong>핵심 풀이:</strong> ${state.currentItem.sol || state.currentItem.h1}<br>
+          위 풀이 과정을 눈으로 꼭 익혀두고 다음 단계로 넘어가요! (이 기록은 완료 보고서에 저장됩니다)<br><br>
+          <button class="btn" onclick="showNextStep4B()">풀이 확인 완료! 다음 단계로 이동하기 👉</button>
+        `;
+        fb.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }
   }
@@ -695,11 +788,18 @@ async function initApp() {
   async function showFinalReport() {
     updateLessonHeader("학습 완료!");
     const needHelp = state.bResults.some(r => r.includes("필요"));
-    const bSummary = state.wrongIndices.length === 0 ? "해당 없음 (첫 시도 100점 완벽 통과!)" : state.bResults.join(", ");
+    const bSummary = state.wrongIndices.length === 0 ? "해당 없음 (첫 시도 100점 완벽 통과!)" : state.bResults.join(" / ");
     const finalState = needHelp ? "추가 복습 필요" : "완료";
     await saveStudyRecord(state.unitKey, state.lessonId, state.score, finalState);
   
-    const recLabel = (mark) => mark === '⭕' ? '혼자 힘으로 첫 시도 성공 (⭕)' : '틀림 / 4단계 보충 학습 진행 (❌)';
+    const step3DetailHTML = [0, 1, 2].map(idx => {
+      const ansObj = state.step3Answers && state.step3Answers[idx];
+      if (!ansObj) return `&nbsp;&nbsp;* ${idx + 1}번: 기록 없음`;
+      return ansObj.isCorrect
+        ? `&nbsp;&nbsp;* ${idx + 1}번: ⭕ 정답 (제출 답안: ${ansObj.myAns})`
+        : `&nbsp;&nbsp;* ${idx + 1}번: ❌ 오답 (내 답: ${ansObj.myAns} ➔ 정답: ${ansObj.correctAns})`;
+    }).join('<br>');
+  
     const nextUnit = state.lessonData.nextUnit;
     const nextBtnHTML = nextUnit
       ? `<button class="btn" onclick="startLesson('${nextUnit}')">다음 시간 [${nextUnit}차시] 바로 이어서 공부하기 👉</button>`
@@ -711,10 +811,8 @@ async function initApp() {
         <strong>- 학생 이름:</strong> ${state.studentName} (${state.studentGrade}학년 ${state.studentSem}학기)<br>
         <strong>- 학습 단원:</strong> ${state.grade}학년 ${state.semester}학기 ${state.unit}단원 (${state.lessonData.title})<br>
         <strong>- 3단계 실력 평가 점수:</strong> ${state.score}점 / 100점 만점<br>
-        &nbsp;&nbsp;* 1번(기본 계산): ${recLabel(state.records[0])}<br>
-        &nbsp;&nbsp;* 2번(오개념 잡기): ${recLabel(state.records[1])}<br>
-        &nbsp;&nbsp;* 3번(실생활 활용): ${recLabel(state.records[2])}<br>
-        <strong>- 4단계 쌍둥이 문제 재도전:</strong> ${bSummary}<br>
+        ${step3DetailHTML}<br>
+        <strong>- 4단계 쌍둥이 보충 과정 기록:</strong> ${bSummary}<br>
         <strong>- 5단계 핵심 원리 3회 낭독:</strong> 완료 ✅<br>
         <strong>- 최종 학습 판정:</strong> [ ${finalState} ]
       </div>
@@ -725,10 +823,14 @@ async function initApp() {
   }
   
   function copyReportForParent() {
-    const recLabel = (mark) => mark === '⭕' ? '첫 시도 정답(O)' : '보충 학습 진행';
-    const bSummary = state.wrongIndices.length === 0 ? "한 번에 100점 통과" : state.bResults.join(", ");
+    const step3Summary = [0, 1, 2].map(idx => {
+      const a = state.step3Answers && state.step3Answers[idx];
+      if (!a) return `${idx + 1}번(-)`;
+      return a.isCorrect ? `${idx + 1}번(⭕ ${a.myAns})` : `${idx + 1}번(❌ 내답:${a.myAns}→정답:${a.correctAns})`;
+    }).join(' / ');
+    const bSummary = state.wrongIndices.length === 0 ? "한 번에 100점 통과" : state.bResults.join(" / ");
     const finalState = state.bResults.some(r => r.includes("필요")) ? "추가 복습 필요" : "완전학습 통과";
-    const shareText = `[📚 ${state.studentName} 학생(${state.studentGrade}-${state.studentSem})의 초등 수학 완전학습 보고서]\n• 학습 일시: ${new Date().toLocaleString()}\n• 학습 차시: ${state.grade}학년 ${state.semester}학기 ${state.lessonData.title}\n• 3단계 실력 평가: ${state.score}점 / 100점\n  - 1번: ${recLabel(state.records[0])} / 2번: ${recLabel(state.records[1])} / 3번: ${recLabel(state.records[2])}\n• 4단계 쌍둥이 보충: ${bSummary}\n• 최종 판정: [${finalState}]`;
+    const shareText = `[📚 ${state.studentName} 학생(${state.studentGrade}-${state.studentSem})의 초등 수학 완전학습 보고서]\n• 학습 일시: ${new Date().toLocaleString()}\n• 학습 차시: ${state.grade}학년 ${state.semester}학기 ${state.lessonData.title}\n• 3단계 실력 평가: ${state.score}점 / 100점\n  - 문항별 기록: ${step3Summary}\n• 4단계 쌍둥이 보충: ${bSummary}\n• 최종 판정: [${finalState}]`;
     navigator.clipboard.writeText(shareText).then(() => alert('✅ 학습 보고서가 복사되었습니다! 카톡에 붙여넣기(Ctrl+V) 하세요.')).catch(() => prompt('복사(Ctrl+C)해서 전달하세요:', shareText));
   }
   
