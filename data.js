@@ -31,7 +31,7 @@ const MATH_DB = {
         "1-1": {
           title: "1-1차시: (자연수) ÷ (자연수)의 몫을 분수로 나타내기",
           goal: "나누어지는 수가 분자(위), 나누는 수가 분모(아래)가 되는 원리를 이해하고 몫을 분수로 나타낼 수 있어요.",
-          videoUrl: "https://www.youtube.com/embed/b5bf21X2dHk?rel=0",
+          videoUrl: "https://youtube.com/shorts/UnRrjFi4Of8?feature=share",
           warmup: null,
           step1Quiz: [
             { q: "1 ÷ 3 을 분수로 나타내려고 합니다. 분모(아래쪽)와 분자(위쪽)에 들어갈 숫자가 바르게 짝지어진 것은 몇 번일까요?", choices: ["1번: 분모에 1, 분자에 3", "2번: 분모에 3, 분자에 1"], ans: "2", h1: "나눗셈 기호(÷) 뒤의 수(나누는 수)가 분모(아래)로 내려가요!", h2: "1을 3으로 똑같이 나누면 3조각 중의 1조각(1/3)이 됩니다." },
@@ -92,7 +92,7 @@ const MATH_DB = {
         "1-2": {
           title: "1-2차시: (분수) ÷ (자연수) 알아보기 (분자가 나누어떨어지는 경우)",
           goal: "분수의 분자가 자연수로 나누어떨어질 때, 분자를 자연수로 나누어 몫을 구할 수 있어요.",
-          videoUrl: "https://www.youtube.com/embed/tHca8-d6fcU?rel=0",
+          videoUrl: "https://youtube.com/shorts/RswaMegJoO8?feature=share",
           warmup: [
             { q: "[지난 시간 복습] 5 ÷ 8 의 몫을 분수로 나타내면 얼마일까요?", num: 5, den: 8, h1: "나눗셈 기호 앞의 수(5)는 분자, 뒤의 수(8)는 분모로 가요!", h2: "분자에 5, 분모에 8을 넣어 5/8를 만들어 보세요." },
             { q: "[지난 시간 복습] 7 ÷ 4 의 몫을 분수로 나타내면 얼마일까요?", num: 7, den: 4, h1: "나누어지는 수 7이 분자, 나누는 수 4가 분모가 됩니다.", h2: "7/4 또는 1과 3/4으로 적어보세요." }
@@ -148,7 +148,7 @@ const MATH_DB = {
         "1-3": {
           title: "1-3차시: (분수) ÷ (자연수) 알아보기 (분자가 나누어떨어지지 않는 경우)",
           goal: "분자가 자연수로 나누어떨어지지 않을 때, 크기가 같은 분수로 바꾸어 계산할 수 있어요.",
-          videoUrl: "https://www.youtube.com/embed/F-htn15B_pQ?rel=0",
+          videoUrl: "https://youtube.com/shorts/U-155quH7t0?feature=share",
           warmup: [
             { q: "[지난 시간 복습] 6/7 ÷ 3 을 계산하면 얼마일까요?", num: 2, den: 7, h1: "분모 7은 그대로 두고, 분자 6을 3으로 나누어 보세요!", h2: "(6 ÷ 3)/7 = 2/7 입니다." }
           ],
@@ -191,7 +191,7 @@ const MATH_DB = {
         "1-4": {
           title: "1-4차시: (분수) ÷ (자연수)를 분수의 곱셈으로 나타내어 계산하기",
           goal: "'÷ 자연수'를 '× 1/자연수'로 바꾸어 분수의 곱셈으로 빠르게 계산할 수 있어요.",
-          videoUrl: "https://www.youtube.com/embed/hK-n9M2M8gI?rel=0",
+          videoUrl: "https://youtube.com/shorts/sDt4G4hYl6E?feature=share",
           warmup: [
             { q: "[지난 시간 복습] 3/5 ÷ 2 를 계산하면 얼마일까요?", num: 3, den: 10, h1: "6/10 ÷ 2 로 바꾸어 계산해 보세요!", h2: "정답은 3/10 입니다." }
           ],
@@ -234,7 +234,7 @@ const MATH_DB = {
         "1-5": {
           title: "1-5차시: (대분수) ÷ (자연수) 알아보기",
           goal: "대분수를 가분수로 바꾼 다음 분수의 나눗셈 원리로 계산할 수 있어요.",
-          videoUrl: "https://www.youtube.com/embed/x5hG-2qZqA4?rel=0",
+          videoUrl: "https://youtube.com/shorts/dgMkxRmXL-g?feature=share",
           warmup: [
             { q: "[지난 시간 복습] 3/4 ÷ 5 를 분수의 곱셈으로 바꾸어 계산하면 얼마일까요?", num: 3, den: 20, h1: "3/4 × 1/5 로 계산해 보세요!", h2: "정답은 3/20 입니다." }
           ],
