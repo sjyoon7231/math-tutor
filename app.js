@@ -722,36 +722,14 @@ function checkWarmup() {
   }
 }
 
-function extractYoutubeEmbedUrl(rawUrl) {
-  if (!rawUrl || typeof rawUrl !== 'string') return '';
-  const url = rawUrl.trim();
-  const match = url.match(/(?:shorts\/|v=|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-  if (match && match[1]) {
-    return `https://www.youtube-nocookie.com/embed/${match[1]}?rel=0&playsinline=1`;
-  }
-  return '';
-}
-
+// 폴더 구분 전과 100% 동일한 동영상 재생 함수
 function showStep1Video() {
   switchStepTimer('step1');
   updateLessonHeader("1단계: 개념 영상");
-  const rawUrl = state.lessonData.videoUrl || '';
-  const cleanUrl = extractYoutubeEmbedUrl(rawUrl);
-
+  const cleanUrl = getCleanYoutubeEmbedUrl(state.lessonData.videoUrl);
   const mediaHTML = cleanUrl
-    ? `
-      <div class="video-box">
-        <iframe src="${cleanUrl}" title="개념 영상" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
-      </div>
-      <div class="video-notice">
-        💡 영상 가운데 재생(▶) 버튼을 눌러 시청하세요!<br>
-        <a href="${rawUrl}" target="_blank" style="display:inline-block; margin-top:8px; padding:6px 14px; background:#fee2e2; color:#b91c1c; border-radius:999px; text-decoration:none; font-size:13px; font-weight:bold;">
-          📺 혹시 화면에 영상이 안 나오면 여기를 눌러 유튜브에서 바로 보기 👉
-        </a>
-      </div>
-    `
+    ? `<div class="video-box"><div class="yt-shield-top"></div><div class="yt-shield-bottom"></div><iframe src="${cleanUrl}" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><div class="video-notice">💡 영상 가운데를 눌러 재생하세요!</div>`
     : `<div class="summary-card">${state.lessonData.summaryCard}</div>`;
-
   const btnText = cleanUrl ? "영상을 끝까지 다 봤어요! (개념 퀴즈 풀기) 👉" : "핵심 약속을 다 읽었어요! (개념 퀴즈 풀기) 👉";
   document.getElementById('app-content').innerHTML = `
     <h2>${state.lessonData.title}</h2>
