@@ -64,7 +64,7 @@ const MODEL_LIST = [
     state.smallStepIdx = 0;
     return `
       <div id="small-step-box" class="small-step-box">
-        <div class="small-step-title">🪜 한 계단씩 빈칸을 채우며 쉽게 풀어볼까요? (스몰 스텝 도우미)</div>
+        <div class="small-step-title">🪜 1단계 도우미: 한 계단씩 빈칸을 채우며 쉽게 풀어볼까요?</div>
         <div id="small-step-list"></div>
       </div>
     `;
@@ -73,9 +73,14 @@ const MODEL_LIST = [
   function activateSmallStepIfNeeded() {
     if (state.attempt < 2) return;
     const box = document.getElementById('small-step-box');
-    if (!box || box.style.display === 'block') return;
-    box.style.display = 'block';
-    renderSmallStepList();
+    if (!box) {
+      openAiTutorForStep('선생님, 문제를 2번 틀렸어요. 첫 번째 힌트 질문으로 도와주세요!');
+      return;
+    }
+    if (box.style.display !== 'block') {
+      box.style.display = 'block';
+      renderSmallStepList();
+    }
     box.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
   
@@ -123,6 +128,7 @@ const MODEL_LIST = [
     }, 60);
   }
   
+  // 스몰 스텝에서 틀리면 정답을 알려주지 않고 즉시 소크라테스 AI 선생님 자동 호출!
   function checkSmallStep(idx) {
     const st = state.smallSteps[idx];
     const msgEl = document.getElementById(`ss-msg-${idx}`);
@@ -136,9 +142,10 @@ const MODEL_LIST = [
         autoFillMainFractionAndSubmit(st.num, st.den);
       } else {
         if (msgEl) {
-          msgEl.style.color = '#dc2626';
-          msgEl.innerText = `💡 기약분수 ${st.num}/${st.den}이 되도록 분자에 ${st.num}, 분모에 ${st.den}을 적어볼까요?`;
+          msgEl.style.color = '#0f766e';
+          msgEl.innerText = `🤖 헷갈리네요! 아래 AI 선생님이 도와줄게요 👇`;
         }
+        openAiTutorForStep(`학생이 스몰스텝 마지막 기약분수 단계(${st.label})에서 분자=${nVal || '빈칸'}, 분모=${dVal || '빈칸'}이라고 적어 틀렸습니다. 정답(${st.num}/${st.den})을 직접 말하지 말고 약분 원리를 깨우치도록 쉬운 질문으로 유도해 주세요!`);
       }
       return;
     }
@@ -152,9 +159,10 @@ const MODEL_LIST = [
       }
     } else {
       if (msgEl) {
-        msgEl.style.color = '#dc2626';
-        msgEl.innerText = `💡 다시 계산해 볼까요? (힌트: 정답은 ${st.ans}이에요!)`;
+        msgEl.style.color = '#0f766e';
+        msgEl.innerText = `🤖 이 계단이 어렵나요? 아래 AI 선생님과 함께 풀어봐요 👇`;
       }
+      openAiTutorForStep(`학생이 "${st.label}" 계단 빈칸에 "${val || '빈칸'}"이라고 적어 틀렸습니다. 이 계단의 빈칸 정답(${st.ans})을 직접 알려주지 말고, 스스로 계산할 수 있도록 아주 쉬운 힌트 질문을 던져주세요!`);
     }
   }
   
@@ -168,7 +176,7 @@ const MODEL_LIST = [
       fd.value = den;
       if (typeof state.currentCheckFn === 'function') state.currentCheckFn();
   
-      const aiSec = document.querySelector('.ai-tutor-section');
+      const aiSec = document.getElementById('ai-tutor-section');
       if (aiSec) aiSec.style.display = 'none';
   
       const fb = document.getElementById('feedback-box');
@@ -188,7 +196,7 @@ const MODEL_LIST = [
   }
   
   // ==========================================
-  // 🤖 2. 소크라테스 AI 튜터 엔진
+  // 🤖 2. 소크라테스 AI 튜터 엔진 (스몰 스텝 실패 시 자동 등장)
   // ==========================================
   function getStudentCurrentInputText() {
     const fn = document.getElementById('frac-n');
@@ -210,6 +218,21 @@ const MODEL_LIST = [
     if (!item) return false;
     const text = userText.trim();
   
+    // 1. 스몰 스텝이 열려 있을 때 현재 계단의 정답을 말했는지 먼저 확인
+    if (state.smallSteps && state.smallStepIdx < state.smallSteps.length) {
+      const curStep = state.smallSteps[state.smallStepIdx];
+      const cleanNum = text.replace(/[^0-9]/g, '');
+      if (!curStep.isFinalFrac && (text === curStep.ans || (cleanNum && cleanNum === curStep.ans))) {
+        const stepInp = document.getElementById(`ss-inp-${state.smallStepIdx}`);
+        if (stepInp) {
+          stepInp.value = curStep.ans;
+          checkSmallStep(state.smallStepIdx);
+          return true;
+        }
+      }
+    }
+  
+    // 2. 본 문제의 분수 정답을 말했는지 확인
     if (item.num && item.den) {
       let w = 0, n = NaN, d = NaN;
       const mixedMatch = text.match(/(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)/) || text.match(/(\d+)\s*[과와]\s*(\d+)\s*분의\s*(\d+)/);
@@ -248,6 +271,7 @@ const MODEL_LIST = [
       }
     }
   
+    // 3. 단답형 정답 확인
     if (item.ans && !item.choices) {
       const cleanNum = text.replace(/[^0-9]/g, '');
       if (text === item.ans || (cleanNum && cleanNum === item.ans)) {
@@ -266,10 +290,15 @@ const MODEL_LIST = [
   function exitAiPanelAndFocus(autoSubmitted = false) {
     const panel = document.getElementById('ai-panel');
     if (panel) panel.style.display = 'none';
-    const fn = document.getElementById('frac-n');
-    const ansInput = document.getElementById('ans-input') || document.getElementById('step5a-input');
+  
     if (!autoSubmitted) {
-      if (fn) {
+      const curStepInp = document.getElementById(`ss-inp-${state.smallStepIdx}`) || document.getElementById(`ss-fn-${state.smallStepIdx}`);
+      const fn = document.getElementById('frac-n');
+      const ansInput = document.getElementById('ans-input') || document.getElementById('step5a-input');
+      if (curStepInp) {
+        curStepInp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        curStepInp.focus();
+      } else if (fn) {
         fn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         fn.focus();
       } else if (ansInput) {
@@ -282,29 +311,46 @@ const MODEL_LIST = [
     }
   }
   
+  // 처음에는 AI 섹션을 숨겨두어(display:none) 학생이 스몰 스텝과 헷갈리지 않게 함
   function getAiTutorHTML() {
     state.aiChatHistory = [];
     return `
-      <div class="ai-tutor-section">
+      <div class="ai-tutor-section" id="ai-tutor-section" style="display:none;">
         <button type="button" class="ai-toggle-btn" onclick="toggleAiPanel()">
-          🤖 혼자 풀기 막막한가요? (AI 선생님과 소크라테스식 문답으로 함께 풀기)
+          👩‍🏫 2단계 도우미: 소크라테스 AI 선생님과 대화하며 힌트 찾기
         </button>
         <div class="ai-panel" id="ai-panel">
           <div class="ai-chat-log" id="ai-chat-log"></div>
           <div class="socratic-reply-box" id="socratic-reply-box" style="display:none;">
-            <div class="socratic-reply-label">👇 아래 버튼을 터치하거나, 정답을 알게 되었다면 바로 적어보세요!</div>
+            <div class="socratic-reply-label">👇 아래 버튼을 터치하거나, 알게 된 숫자를 바로 적어보세요!</div>
             <div class="ai-quick-row" id="ai-quick-row"></div>
           </div>
           <div class="ai-input-row">
-            <input type="text" id="ai-question-input" class="ai-input" placeholder="대답이나 최종 정답(예: 3/5)을 적으면 바로 채점돼요!" onkeydown="if(event.key==='Enter') askAiTeacher()">
+            <input type="text" id="ai-question-input" class="ai-input" placeholder="대답이나 정답을 적으면 자동으로 빈칸에 들어가요!" onkeydown="if(event.key==='Enter') askAiTeacher()">
             <button type="button" class="ai-send-btn" onclick="askAiTeacher()">대답하기</button>
           </div>
           <button type="button" class="ai-exit-btn" onclick="exitAiPanelAndFocus(false)">
-            🚀 아하, 이제 이해했어요! (창 닫고 위 문제에 직접 답 적으러 가기 ⬆️)
+            🚀 아하, 이제 알겠어요! (위로 올라가서 빈칸 채우기 ⬆️)
           </button>
         </div>
       </div>
     `;
+  }
+  
+  // 스몰 스텝 빈칸을 틀렸을 때 자동으로 AI 선생님 패널을 열고 첫 질문을 던지는 함수
+  function openAiTutorForStep(reasonPrompt) {
+    const sec = document.getElementById('ai-tutor-section');
+    const panel = document.getElementById('ai-panel');
+    if (sec) sec.style.display = 'block';
+    if (panel) panel.style.display = 'block';
+  
+    setTimeout(() => {
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  
+    if (state.aiChatHistory.length === 0) {
+      askAiTeacher(reasonPrompt || '선생님, 빈칸 채우기가 막막해요. 첫 번째 힌트 질문을 던져주세요!', true);
+    }
   }
   
   function toggleAiPanel() {
@@ -345,7 +391,7 @@ const MODEL_LIST = [
     const row = document.getElementById('ai-quick-row');
     if (!box || !row) return;
     if (isFinished) {
-      row.innerHTML = `<button type="button" class="ai-quick-chip" style="background:#0d9488; color:#fff;" onclick="exitAiPanelAndFocus(false)">⬆️ 위 문제 입력 칸으로 가서 정답 적기!</button>`;
+      row.innerHTML = `<button type="button" class="ai-quick-chip" style="background:#0d9488; color:#fff;" onclick="exitAiPanelAndFocus(false)">⬆️ 위 빈칸에 정답 적으러 가기!</button>`;
       box.style.display = 'block';
       return;
     }
@@ -392,11 +438,11 @@ const MODEL_LIST = [
   ${getStudentCurrentInputText()}
   [지금까지의 대화 기록]
   ${historyText || '(첫 대화 시작)'}
-  [방금 학생이 한 말]: "${userText}"
+  [상황 또는 학생의 말]: "${userText}"
   [규칙]
   1. 원리를 한 번에 다 설명하거나 정답(${curAnsInfo})을 먼저 말하지 마세요.
-  2. 1~2문장으로 공감한 뒤, 정답에 다가가기 위한 '아주 쉬운 단답형 유도 질문 1개'로 끝내세요.
-  3. 만약 학생이 이미 정답이나 분자·분모 값을 찾아냈다면 추가 질문을 멈추고 "완벽하게 정답을 찾아냈어! 👏 위 입력 칸에 답을 적어보자! [대화종료]"라고 끝내세요.
+  2. 1~2문장으로 다정하게 공감한 뒤, 현재 막힌 계단이나 문제를 풀기 위한 '아주 쉬운 단답형 유도 질문 1개'로 끝내세요.
+  3. 만약 학생이 빈칸의 답이나 최종 정답을 찾아냈다면 추가 질문을 멈추고 "완벽하게 찾아냈어! 👏 위 빈칸에 답을 적어보자! [대화종료]"라고 끝내세요.
   4. '역수', '단위분수', 별표(**) 사용 금지.
   5. 진행 중일 때만 맨 마지막 줄에 터치 선택지 2~3개를 아래 형식으로 작성:
   [선택: 짧은대답1 | 짧은대답2]`;

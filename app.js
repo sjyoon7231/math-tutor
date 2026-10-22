@@ -345,6 +345,7 @@ async function initApp() {
     `;
   }
   
+  // 3번째에 정답을 공짜로 알려주지 않고 스몰 스텝 -> AI 선생님으로 유도
   function checkWarmup() {
     const fb = document.getElementById('feedback-box');
     const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
@@ -358,13 +359,12 @@ async function initApp() {
       fb.className = "feedback hint";
       if (state.attempt === 1) {
         fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
-      } else if (state.attempt === 2) {
-        fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}\n👇 아래에 열린 [한 계단씩 빈칸 채우기] 도우미를 따라 해보세요!`;
-        activateSmallStepIfNeeded();
+        state.attempt++;
       } else {
-        fb.innerHTML = `💡 <strong>함께 확인해요:</strong> ${state.currentItem.h2}<br>정답은 <strong>${state.currentItem.num}/${state.currentItem.den}</strong>입니다.<br><br><button class="btn" onclick="showStep1Video()">이해했어요! 오늘의 개념 보러 가기 👉</button>`;
+        fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}\n👇 아래에 열린 [1단계 도우미: 스몰 스텝 빈칸]을 차례대로 채워보세요! (빈칸도 틀리면 AI 선생님이 나타납니다!)`;
+        state.attempt++;
+        activateSmallStepIfNeeded();
       }
-      state.attempt++;
     }
   }
   
@@ -406,10 +406,14 @@ async function initApp() {
       fb.innerHTML = `정답이에요! (정답: <strong>${ansText}</strong>)<br><br><button class="btn" onclick="showStep2_1()">2단계 교과서 문제로 이동하기 👉</button>`;
     } else {
       fb.className = "feedback hint";
-      if (state.attempt === 1) fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
-      else if (state.attempt === 2) fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}`;
-      else fb.innerHTML = `💡 <strong>핵심 풀이:</strong> ${state.currentItem.h2}<br>알맞은 답은 <strong>${ansText}</strong>입니다.<br><br><button class="btn" onclick="showStep2_1()">2단계로 이동하기 👉</button>`;
-      state.attempt++;
+      if (state.attempt === 1) {
+        fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
+        state.attempt++;
+      } else {
+        fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}\n👇 아래에 소크라테스 AI 선생님이 나타났어요! 대화를 통해 정답 보기를 찾아보세요!`;
+        state.attempt++;
+        openAiTutorForStep(`학생이 객관식 문제에서 "${choice}번"을 골라 2번 틀렸습니다. 정답 번호를 직접 말하지 말고 쉬운 질문으로 유도해 주세요!`);
+      }
     }
   }
   
@@ -436,10 +440,14 @@ async function initApp() {
       fb.innerHTML = `정답이에요! 빈칸 ①에 들어갈 수는 <strong>${state.currentItem.ans}</strong>입니다.<br><br><button class="btn" onclick="showStep2_2()">다음 문제(혼자 풀기)로 이동 👉</button>`;
     } else {
       fb.className = "feedback hint";
-      if (state.attempt === 1) fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
-      else if (state.attempt === 2) fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}`;
-      else fb.innerHTML = `💡 <strong>정석 풀이:</strong> ${state.currentItem.h2}<br>빈칸 ①은 <strong>${state.currentItem.ans}</strong>입니다!<br><br><button class="btn" onclick="showStep2_2()">다음 문제(혼자 풀기)로 이동 👉</button>`;
-      state.attempt++;
+      if (state.attempt === 1) {
+        fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
+        state.attempt++;
+      } else {
+        fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}\n👇 아래에 나타난 소크라테스 AI 선생님과 함께 빈칸 ①에 들어갈 수를 찾아보세요!`;
+        state.attempt++;
+        openAiTutorForStep(`학생이 빈칸 ① 채우기 문제에서 "${val || '빈칸'}"이라고 적어 2번 틀렸습니다. 정답(${state.currentItem.ans})을 직접 말하지 말고 쉬운 질문으로 유도해 주세요!`);
+      }
     }
   }
   
@@ -472,13 +480,12 @@ async function initApp() {
       fb.className = "feedback hint";
       if (state.attempt === 1) {
         fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
-      } else if (state.attempt === 2) {
-        fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}\n👇 막막하다면 아래 [스몰 스텝 도우미]의 작은 빈칸부터 차례대로 채워보세요!`;
-        activateSmallStepIfNeeded();
+        state.attempt++;
       } else {
-        fb.innerHTML = `💡 <strong>정석 풀이:</strong> ${state.currentItem.h2}<br>정답은 <strong>${state.currentItem.num}/${state.currentItem.den}</strong>입니다.<br><br><button class="btn" onclick="showStep3(0)">3단계 실력 평가 시작하기 👉</button>`;
+        fb.innerText = `💡 2차 힌트: ${state.currentItem.h2}\n👇 아래에 열린 [1단계 도우미: 스몰 스텝 빈칸]을 차례대로 채워보세요! (빈칸도 막히면 AI 선생님이 도와줍니다!)`;
+        state.attempt++;
+        activateSmallStepIfNeeded();
       }
-      state.attempt++;
     }
   }
   
@@ -490,7 +497,7 @@ async function initApp() {
   
     document.getElementById('app-content').innerHTML = `
       <h2>3단계 실력 평가 (A형 ${idx + 1}번)</h2>
-      <div class="goal-box">📝 <strong>실력 평가 시간입니다!</strong> 이 단계에서는 AI 선생님의 도움 없이 스스로의 힘으로 문제를 풀어보세요.</div>
+      <div class="goal-box">📝 <strong>실력 평가 시간입니다!</strong> 이 단계에서는 스몰 스텝과 AI 선생님의 도움 없이 스스로의 힘으로 문제를 풀어보세요.</div>
       <div class="question-box">${state.currentItem.q}</div>
       ${getFractionHTML(`checkStep3(${idx})`)}
       <button class="btn" id="submit-btn" onclick="checkStep3(${idx})">정답 제출하기</button>
@@ -538,7 +545,7 @@ async function initApp() {
         const nextLabel = idx < 2 ? `다음 문제(${idx + 2}번)로 이동 👉` : `4단계 보충 학습으로 이동 👉`;
         const submitBtn = document.getElementById('submit-btn');
         if (submitBtn) submitBtn.style.display = 'none';
-        fb.innerHTML = `💡 <strong>정석 풀이:</strong> ${state.currentItem.h2}<br>정답은 <strong>${state.currentItem.num}/${state.currentItem.den}</strong>입니다. 4단계에서 AI 선생님과 함께 쌍둥이 문제로 다시 정복해 봅시다!<br><br><button class="btn" onclick="${nextAction}">${nextLabel}</button>`;
+        fb.innerHTML = `💡 <strong>정석 풀이:</strong> ${state.currentItem.h2}<br>정답은 <strong>${state.currentItem.num}/${state.currentItem.den}</strong>입니다. 4단계에서 스몰 스텝과 AI 선생님과 함께 쌍둥이 문제로 다시 정복해 봅시다!<br><br><button class="btn" onclick="${nextAction}">${nextLabel}</button>`;
       }
       state.attempt++;
     }
@@ -558,7 +565,7 @@ async function initApp() {
       <h2>4단계: 핵심 비법 보충 & 쌍둥이 문제 재도전</h2>
       <div class="goal-box">
         3단계 평가에서 아쉬웠던 문제를 완벽히 내 것으로 만드는 시간이에요!<br>
-        4단계에서는 막힐 때 <strong>소크라테스 AI 선생님</strong> 및 <strong>스몰 스텝 도우미</strong>와 함께 원리를 깨우칠 수 있어요.<br><br>
+        4단계에서는 막힐 때 <strong>1단계 스몰 스텝 빈칸</strong>과 <strong>2단계 소크라테스 AI 선생님</strong>이 차례대로 도와주니 끝까지 내 힘으로 풀어보세요!<br><br>
         <strong>[핵심 비법]</strong> ${state.lessonData.step4Intro}
       </div>
       <button class="btn" onclick="showNextStep4B()">쌍둥이 문제 재도전 시작하기 👉</button>
@@ -586,11 +593,14 @@ async function initApp() {
     `;
   }
   
+  // 4단계 쌍둥이 문제도 정답을 그냥 알려주지 않고 스몰 스텝 -> AI 선생님으로 끝까지 해결하게 함
   function checkStep4B(qIdx) {
     const fb = document.getElementById('feedback-box');
     const status = checkFractionStatus(state.currentItem.num, state.currentItem.den);
     if (status === 'correct') {
-      state.bResults.push(`${qIdx + 1}번 재도전 통과 완료`);
+      if (!state.bResults.some(r => r.startsWith(`${qIdx + 1}번`))) {
+        state.bResults.push(`${qIdx + 1}번 재도전 통과 완료`);
+      }
       const submitBtn = document.getElementById('b-submit-btn');
       if (submitBtn) submitBtn.style.display = 'none';
       fb.className = "feedback correct";
@@ -603,17 +613,11 @@ async function initApp() {
         fb.className = "feedback hint";
         fb.innerText = `💡 1차 힌트: ${state.currentItem.h1}`;
         state.attempt++;
-      } else if (state.attempt === 2) {
-        fb.className = "feedback hint";
-        fb.innerText = `💡 혼자 풀기 어렵나요? 아래에 열린 [스몰 스텝 도우미]의 작은 빈칸을 하나씩 채우며 완성해 보세요!`;
-        activateSmallStepIfNeeded();
-        state.attempt++;
       } else {
-        state.bResults.push(`${qIdx + 1}번 추가 복습 필요`);
-        const submitBtn = document.getElementById('b-submit-btn');
-        if (submitBtn) submitBtn.style.display = 'none';
         fb.className = "feedback hint";
-        fb.innerHTML = `💡 <strong>정석 풀이 확인:</strong> ${state.currentItem.sol}<br><br><button class="btn" onclick="showNextStep4B()">다음 단계로 이동 👉</button>`;
+        fb.innerText = `💡 혼자 풀기 어렵나요? 아래에 열린 [1단계 도우미: 스몰 스텝 빈칸]을 하나씩 채워보세요! (빈칸도 틀리면 AI 선생님이 나와서 도와줍니다!)`;
+        state.attempt++;
+        activateSmallStepIfNeeded();
       }
     }
   }
