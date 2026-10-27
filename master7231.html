@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>마스터 회원관리 컨트롤 타워</title>
+  <!-- Firebase SDK (App, Auth, Firestore) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: 'Pretendard', 'Malgun Gothic', sans-serif; }
+    body { margin: 0; padding: 24px; background: #f1f5f9; color: #0f172a; }
+    .container { max-width: 1180px; margin: 0 auto; }
+
+    /* 로그인 카드 */
+    .login-card {
+      max-width: 440px; margin: 80px auto; background: #ffffff;
+      padding: 36px 28px; border-radius: 20px; text-align: center;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); border: 1px solid #e2e8f0;
+    }
+    .google-btn {
+      width: 100%; padding: 14px; border: none; border-radius: 12px;
+      background: #1d4ed8; color: #ffffff; font-size: 16px; font-weight: 800;
+      cursor: pointer; margin-top: 18px;
+    }
+    .google-btn:hover { background: #1e40af; }
+
+    /* 상단 헤더 */
+    .top-bar {
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+      background: #1e293b; color: #ffffff; padding: 20px 24px; border-radius: 16px; margin-bottom: 20px;
+    }
+    .top-title { margin: 0; font-size: 22px; font-weight: 800; }
+    .top-sub { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+    .top-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .btn {
+      padding: 9px 14px; border: none; border-radius: 8px; font-size: 13px;
+      font-weight: 700; cursor: pointer;
+    }
+    .btn-blue { background: #2563eb; color: #fff; }
+    .btn-green { background: #059669; color: #fff; }
+    .btn-amber { background: #d97706; color: #fff; }
+    .btn-red { background: #dc2626; color: #fff; }
+    .btn-gray { background: #475569; color: #fff; }
+    .btn-outline { background: #ffffff; color: #334155; border: 1px solid #cbd5e1; }
+
+    /* 요약 통계 박스 */
+    .stat-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px; margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #ffffff; padding: 16px 18px; border-radius: 14px;
+      border: 1px solid #e2e8f0; cursor: pointer; transition: transform 0.1s;
+    }
+    .stat-card:hover { transform: translateY(-2px); border-color: #94a3b8; }
+    .stat-label { font-size: 13px; color: #64748b; font-weight: 700; }
+    .stat-num { font-size: 26px; font-weight: 800; margin-top: 6px; color: #0f172a; }
+
+    /* 패널 공통 */
+    .panel {
+      background: #ffffff; padding: 20px; border-radius: 16px;
+      border: 1px solid #e2e8f0; margin-bottom: 20px;
+    }
+    .panel-title { margin: 0 0 12px; font-size: 16px; font-weight: 800; color: #1e3a8a; }
+    .form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .input {
+      padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;
+    }
+
+    /* 회원 목록 표 */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: middle; }
+    th { background: #f8fafc; color: #334155; font-weight: 800; white-space: nowrap; }
+    tr:hover td { background: #f8fafc; }
+
+    .badge {
+      display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 800;
+    }
+    .b-pending { background: #fef3c7; color: #b45309; }
+    .b-active { background: #dcfce7; color: #15803d; }
+    .b-blocked { background: #fee2e2; color: #b91c1c; }
+    .b-expired { background: #f1f5f9; color: #475569; }
+    .b-tester { background: #e0e7ff; color: #4338ca; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- 1. 구글 마스터 로그인 화면 -->
+  <div id="auth-view" class="login-card">
+    <div style="font-size:40px; margin-bottom:8px;">🛡️</div>
+    <h2 style="margin:0; color:#1e3a8a;">마스터 회원관리 컨트롤 타워</h2>
+    <p style="font-size:14px; color:#64748b; margin-top:8px;">
+      지정된 마스터 구글 계정으로만 접속할 수 있습니다.
+    </p>
+    <button type="button" class="google-btn" onclick="loginWithGoogle()">
+      🔵 Google 계정으로 마스터 로그인
+    </button>
+    <div id="auth-err" style="margin-top:14px; color:#dc2626; font-size:14px; font-weight:700;"></div>
+  </div>
+
+  <!-- 2. 마스터 대시보드 본 화면 -->
+  <div id="admin-view" style="display:none;">
+    <div class="top-bar">
+      <div>
+        <h1 class="top-title">🛡️ 초등 수학 AI 학습방 · 마스터 관리실</h1>
+        <div class="top-sub" id="master-email-label">마스터 인증됨</div>
+      </div>
+      <div class="top-actions">
+        <button type="button" class="btn btn-green" onclick="enterStudyAsMaster()">🚀 공부방(전체학년) 미리보기 입장</button>
+        <button type="button" class="btn btn-blue" onclick="loadMembers()">🔄 목록 새로고침</button>
+        <button type="button" class="btn btn-gray" onclick="logoutMaster()">로그아웃</button>
+      </div>
+    </div>
+
+    <!-- 상단 통계 요약 (클릭 시 필터링) -->
+    <div class="stat-grid">
+      <div class="stat-card" onclick="setFilter('all')">
+        <div class="stat-label">👥 전체 등록 계정</div>
+        <div class="stat-num" id="cnt-all">0</div>
+      </div>
+      <div class="stat-card" onclick="setFilter('pending')">
+        <div class="stat-label" style="color:#b45309;">🟡 승인 대기 (신규신청)</div>
+        <div class="stat-num" id="cnt-pending" style="color:#d97706;">0</div>
+      </div>
+      <div class="stat-card" onclick="setFilter('active')">
+        <div class="stat-label" style="color:#15803d;">🟢 정상 이용 중</div>
+        <div class="stat-num" id="cnt-active" style="color:#16a34a;">0</div>
+      </div>
+      <div class="stat-card" onclick="setFilter('tester')">
+        <div class="stat-label" style="color:#4338ca;">🧪 시연용 테스터</div>
+        <div class="stat-num" id="cnt-tester" style="color:#4f46e5;">0</div>
+      </div>
+      <div class="stat-card" onclick="setFilter('stopped')">
+        <div class="stat-label" style="color:#b91c1c;">🔴 정지 / 기간만료</div>
+        <div class="stat-num" id="cnt-stopped" style="color:#dc2626;">0</div>
+      </div>
+    </div>
+
+    <!-- 도구 패널 1: 테스터 빠른 생성 & 제미나이 API 키 설정 -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
+      <!-- 테스터 생성기 -->
+      <div class="panel">
+        <h3 class="panel-title">🧪 시연용 테스터 계정 빠른 생성 / 초기화</h3>
+        <div class="form-row">
+          <input type="text" id="t-id" class="input" placeholder="ID (예: tester1)" value="tester1" style="width:130px;">
+          <input type="text" id="t-pin" class="input" placeholder="비번 (예: 1234)" value="1234" style="width:110px;">
+          <select id="t-days" class="input">
+            <option value="7" selected>7일권</option>
+            <option value="30">30일권</option>
+            <option value="unlimited">무제한</option>
+          </select>
+          <button type="button" class="btn btn-blue" onclick="createTesterAccount()">+ 테스터 저장</button>
+        </div>
+        <div style="font-size:12px; color:#64748b; margin-top:8px;">
+          * 테스터 계정은 로그인 시 이메일 검사 없이 통과하며 1~6학년 전체 메뉴가 열립니다.
+        </div>
+      </div>
+
+      <!-- 제미나이 API 키 관리 -->
+      <div class="panel">
+        <h3 class="panel-title">⚙️ 클라우드 제미나이(Gemini) API 키 설정</h3>
+        <div class="form-row">
+          <input type="password" id="gemini-key-input" class="input" placeholder="AIza... 또는 AQ... 키 입력" style="flex:1; min-width:180px;">
+          <button type="button" class="btn btn-green" onclick="saveCloudGeminiKey()">💾 키 저장</button>
+          <button type="button" class="btn btn-outline" onclick="toggleKeyVisibility()">👁️ 보기</button>
+        </div>
+        <div id="key-status-msg" style="font-size:12px; color:#0f766e; font-weight:700; margin-top:8px;"></div>
+      </div>
+    </div>
+
+    <!-- 회원 목록 테이블 -->
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+        <h3 class="panel-title" style="margin:0;" id="list-title">📋 전체 회원 목록</h3>
+        <input type="text" id="search-input" class="input" placeholder="🔍 이메일 또는 학생 이름 검색..." oninput="renderMemberTable()" style="width:260px;">
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>구분</th>
+              <th>학부모 이메일 (또는 ID)</th>
+              <th>학생 이름 (학년)</th>
+              <th>상태</th>
+              <th>만료일</th>
+              <th>학습 완료 차시</th>
+              <th>가입/최근접속</th>
+              <th>마스터 원클릭 제어</th>
+            </tr>
+          </thead>
+          <tbody id="member-tbody">
+            <tr><td colspan="8" style="text-align:center; padding:30px;">데이터를 불러오는 중...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyAIf_-5uMXH4LNGSOdGVgM2PZZ_1-qK7pc",
+    authDomain: "math-self-srudy.firebaseapp.com",
+    projectId: "math-self-srudy",
+    storageBucket: "math-self-srudy.firebasestorage.app",
+    messagingSenderId: "27278117022",
+    appId: "1:27278117022:web:2e05a51a4a4b1d97e8538f",
+    measurementId: "G-53JHN6FH62"
+  };
+
+  if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // 허용된 마스터 구글 이메일 목록
+  const ALLOWED_MASTER_EMAILS = [
+    "sjyoon7231@gmail.com"
+  ];
+
+  let allMembers = [];
+  let currentFilter = 'all';
+
+  async function sha256Hash(text) {
+    const clean = String(text || '').trim() + "_MATH_SALT_2026";
+    if (window.crypto && window.crypto.subtle) {
+      const buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(clean));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    let h = 0;
+    for (let i = 0; i < clean.length; i++) h = Math.imul(31, h) + clean.charCodeAt(i) | 0;
+    return "fb_" + Math.abs(h).toString(16);
+  }
+
+  // 구글 로그인 처리
+  function loginWithGoogle() {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    auth.signInWithPopup(provider).catch(err => {
+      document.getElementById('auth-err').innerText = "⚠️ 로그인 창 오류: " + err.message;
+    });
+  }
+
+  function logoutMaster() {
+    auth.signOut();
+  }
+
+  auth.onAuthStateChanged(user => {
+    const errEl = document.getElementById('auth-err');
+    if (!user) {
+      document.getElementById('auth-view').style.display = 'block';
+      document.getElementById('admin-view').style.display = 'none';
+      return;
+    }
+
+    const email = (user.email || '').toLowerCase();
+    if (!ALLOWED_MASTER_EMAILS.includes(email)) {
+      errEl.innerText = `⛔ [${email}] 계정은 마스터 권한이 없습니다.`;
+      auth.signOut();
+      return;
+    }
+
+    errEl.innerText = '';
+    document.getElementById('auth-view').style.display = 'none';
+    document.getElementById('admin-view').style.display = 'block';
+    document.getElementById('master-email-label').innerText = `인증된 마스터: ${email}`;
+
+    loadCloudGeminiKey();
+    loadMembers();
+  });
+
+  // 날짜 계산 도우미
+  function getTodayYMD() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function addDaysYMD(baseYMD, days) {
+    const now = new Date();
+    let base = now;
+    if (baseYMD && /^\d{4}-\d{2}-\d{2}$/.test(baseYMD)) {
+      const p = new Date(baseYMD + "T23:59:59");
+      if (!isNaN(p.getTime()) && p > now) base = p;
+    }
+    const target = new Date(base.getTime() + days * 86400000);
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`;
+  }
+
+  function isExpired(m) {
+    if (m.isUnlimited) return false;
+    if (!m.expireDate) return false;
+    return getTodayYMD() > m.expireDate;
+  }
+
+  // 제미나이 API 키 로드 및 저장
+  async function loadCloudGeminiKey() {
+    try {
+      const doc = await db.collection('settings').doc('gemini').get();
+      const inp = document.getElementById('gemini-key-input');
+      const msg = document.getElementById('key-status-msg');
+      if (doc.exists && doc.data().apiKey) {
+        inp.value = doc.data().apiKey;
+        msg.innerText = `✅ 클라우드에 API 키가 정상 등록되어 있습니다. (최근 수정: ${doc.data().updatedAt || '-'})`;
+      } else {
+        msg.innerText = `⚠️ 아직 등록된 API 키가 없습니다.`;
+      }
+    } catch (e) {}
+  }
+
+  async function saveCloudGeminiKey() {
+    const key = (document.getElementById('gemini-key-input').value || '').trim();
+    try {
+      await db.collection('settings').doc('gemini').set({
+        apiKey: key,
+        updatedAt: new Date().toLocaleString()
+      });
+      localStorage.setItem('GEMINI_API_KEY', key);
+      loadCloudGeminiKey();
+      alert("✅ 클라우드에 제미나이 API 키가 저장되었습니다!");
+    } catch (e) {
+      alert("⚠️ 저장 실패: " + e.message);
+    }
+  }
+
+  function toggleKeyVisibility() {
+    const inp = document.getElementById('gemini-key-input');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+
+  // 시연용 테스터 계정 생성
+  async function createTesterAccount() {
+    const tId = (document.getElementById('t-id').value || '').trim().toLowerCase();
+    const tPin = (document.getElementById('t-pin').value || '').trim();
+    const tDays = document.getElementById('t-days').value;
+
+    if (!/^tester\d+$/i.test(tId)) {
+      alert("⚠️ 테스터 ID는 tester1, tester2 처럼 'tester + 숫자' 형식으로 입력해 주세요.");
+      return;
+    }
+    if (!tPin) {
+      alert("⚠️ 비밀번호를 입력해 주세요.");
+      return;
+    }
+
+    const pinHash = await sha256Hash(tPin);
+    const isUnlimited = (tDays === 'unlimited');
+    const expireDate = isUnlimited ? '9999-12-31' : addDaysYMD('', parseInt(tDays, 10));
+
+    try {
+      await db.collection('students').doc(tId).set({
+        studentId: tId,
+        accountType: 'tester',
+        parentEmail: tId,
+        name: tId.toUpperCase(),
+        pinHash: pinHash,
+        grade: '6',
+        semester: '1',
+        status: 'active',
+        isUnlimited: isUnlimited,
+        expireDate: expireDate,
+        updatedAt: new Date().toLocaleString(),
+        createdTimestamp: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      alert(`✅ [${tId}] 테스터 계정이 생성(업데이트)되었습니다! (비번: ${tPin})`);
+      loadMembers();
+    } catch (e) {
+      alert("⚠️ 테스터 생성 오류: " + e.message);
+    }
+  }
+
+  // 전체 회원 불러오기
+  async function loadMembers() {
+    const tbody = document.getElementById('member-tbody');
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px;">☁️ 클라우드 회원 목록을 불러오는 중...</td></tr>`;
+    try {
+      const snap = await db.collection('students').get();
+      allMembers = [];
+      snap.forEach(doc => {
+        allMembers.push({ docId: doc.id, ...doc.data() });
+      });
+
+      // 승인 대기(pending)를 맨 위로 정렬
+      allMembers.sort((a, b) => {
+        const score = m => (m.status === 'pending' ? 0 : (m.accountType === 'tester' ? 2 : 1));
+        return score(a) - score(b);
+      });
+
+      updateStats();
+      renderMemberTable();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#dc2626;">불러오기 실패: ${e.message}</td></tr>`;
+    }
+  }
+
+  function updateStats() {
+    let pending = 0, active = 0, tester = 0, stopped = 0;
+    allMembers.forEach(m => {
+      const st = m.status || 'active';
+      const exp = isExpired(m);
+      if (m.accountType === 'tester') tester++;
+      if (st === 'pending') pending++;
+      else if (st === 'blocked' || exp) stopped++;
+      else active++;
+    });
+
+    document.getElementById('cnt-all').innerText = allMembers.length;
+    document.getElementById('cnt-pending').innerText = pending;
+    document.getElementById('cnt-active').innerText = active;
+    document.getElementById('cnt-tester').innerText = tester;
+    document.getElementById('cnt-stopped').innerText = stopped;
+  }
+
+  function setFilter(f) {
+    currentFilter = f;
+    const titles = {
+      all: '📋 전체 회원 목록',
+      pending: '🟡 승인 대기 중인 신규 신청자',
+      active: '🟢 정상 이용 중인 회원',
+      tester: '🧪 시연용 테스터 계정 목록',
+      stopped: '🔴 일시 정지 및 기간 만료 계정'
+    };
+    document.getElementById('list-title').innerText = titles[f] || '📋 회원 목록';
+    renderMemberTable();
+  }
+
+  function countCompletedLessons(records) {
+    if (!records || typeof records !== 'object') return 0;
+    let cnt = 0;
+    Object.values(records).forEach(unitObj => {
+      if (unitObj && typeof unitObj === 'object') {
+        cnt += Object.keys(unitObj).length;
+      }
+    });
+    return cnt;
+  }
+
+  function renderMemberTable() {
+    const tbody = document.getElementById('member-tbody');
+    const q = (document.getElementById('search-input').value || '').trim().toLowerCase();
+
+    const filtered = allMembers.filter(m => {
+      const st = m.status || 'active';
+      const exp = isExpired(m);
+      if (currentFilter === 'pending' && st !== 'pending') return false;
+      if (currentFilter === 'active' && (st !== 'active' || exp)) return false;
+      if (currentFilter === 'tester' && m.accountType !== 'tester') return false;
+      if (currentFilter === 'stopped' && st !== 'blocked' && !exp) return false;
+
+      if (q) {
+        const hay = `${m.parentEmail || ''} ${m.name || ''} ${m.docId || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:#64748b;">해당 조건의 회원이 없습니다.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(m => {
+      const isTester = m.accountType === 'tester';
+      const st = m.status || 'active';
+      const exp = isExpired(m);
+
+      let statusBadge = `<span class="badge b-active">🟢 이용중</span>`;
+      if (st === 'pending') statusBadge = `<span class="badge b-pending">🟡 승인대기</span>`;
+      else if (st === 'blocked') statusBadge = `<span class="badge b-blocked">🔴 일시정지</span>`;
+      else if (exp) statusBadge = `<span class="badge b-expired">📅 기간만료</span>`;
+
+      const expireText = m.isUnlimited ? '♾️ 무제한' : (m.expireDate || '미지정');
+      const doneCnt = countCompletedLessons(m.records);
+
+      return `
+        <tr>
+          <td>${isTester ? `<span class="badge b-tester">🧪 테스터</span>` : `👦 정식학생`}</td>
+          <td style="font-weight:700;">${m.parentEmail || '(기존 이름계정)'}</td>
+          <td><b>${m.name || m.docId}</b> (${m.grade || '6'}-${m.semester || '1'})</td>
+          <td>${statusBadge}</td>
+          <td style="font-weight:700; color:${exp ? '#dc2626' : '#0f172a'};">${expireText}</td>
+          <td>📚 ${doneCnt}개 차시 완료</td>
+          <td style="font-size:12px; color:#64748b;">${m.updatedAt || m.createdAt || '-'}</td>
+          <td>
+            <div style="display:flex; gap:5px; flex-wrap:wrap;">
+              ${st === 'pending'
+                ? `<button class="btn btn-green" onclick="approveMember('${m.docId}')">🟢 승인(+30일)</button>`
+                : `<button class="btn btn-blue" onclick="extendMember('${m.docId}', '${m.expireDate || ''}')">+30일 연장</button>`
+              }
+              <button class="btn btn-outline" onclick="setUnlimited('${m.docId}', ${!m.isUnlimited})">
+                ${m.isUnlimited ? '기간제로' : '♾️무제한'}
+              </button>
+              ${st === 'blocked'
+                ? `<button class="btn btn-amber" onclick="setBlockStatus('${m.docId}', 'active')">정지해제</button>`
+                : `<button class="btn btn-amber" onclick="setBlockStatus('${m.docId}', 'blocked')">일시정지</button>`
+              }
+              <button class="btn btn-red" onclick="deleteMember('${m.docId}', '${m.name || m.docId}')">삭제</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // 원클릭 제어 함수들
+  async function approveMember(docId) {
+    const newExpire = addDaysYMD('', 30);
+    await db.collection('students').doc(docId).set({
+      status: 'active',
+      isUnlimited: false,
+      expireDate: newExpire,
+      updatedAt: new Date().toLocaleString()
+    }, { merge: true });
+    loadMembers();
+  }
+
+  async function extendMember(docId, currentExpire) {
+    const newExpire = addDaysYMD(currentExpire, 30);
+    await db.collection('students').doc(docId).set({
+      status: 'active',
+      isUnlimited: false,
+      expireDate: newExpire,
+      updatedAt: new Date().toLocaleString()
+    }, { merge: true });
+    loadMembers();
+  }
+
+  async function setUnlimited(docId, flag) {
+    await db.collection('students').doc(docId).set({
+      status: 'active',
+      isUnlimited: flag,
+      expireDate: flag ? '9999-12-31' : addDaysYMD('', 30),
+      updatedAt: new Date().toLocaleString()
+    }, { merge: true });
+    loadMembers();
+  }
+
+  async function setBlockStatus(docId, newStatus) {
+    await db.collection('students').doc(docId).set({
+      status: newStatus,
+      updatedAt: new Date().toLocaleString()
+    }, { merge: true });
+    loadMembers();
+  }
+
+  async function deleteMember(docId, name) {
+    if (!confirm(`⚠️ 정말 [${name}] 계정을 완전히 삭제할까요? (복구 불가)`)) return;
+    await db.collection('students').doc(docId).delete();
+    loadMembers();
+  }
+
+  // 마스터가 전체 학년 공부방을 직접 테스트하고 싶을 때
+  async function enterStudyAsMaster() {
+    const masterDocId = 'MASTER_PREVIEW';
+    await db.collection('students').doc(masterDocId).set({
+      studentId: masterDocId,
+      accountType: 'tester',
+      parentEmail: 'master@preview',
+      name: '마스터선생님',
+      grade: '6',
+      semester: '1',
+      status: 'active',
+      isUnlimited: true,
+      expireDate: '9999-12-31'
+    }, { merge: true });
+
+    localStorage.setItem('MATH_CURRENT_SESSION', JSON.stringify({
+      docId: masterDocId,
+      parentEmail: 'master@preview',
+      name: '마스터선생님',
+      grade: '6',
+      semester: '1',
+      accountType: 'tester',
+      isAllAccess: true,
+      verifiedAt: Date.now()
+    }));
+    window.location.href = 'study.html';
+  }
+</script>
+</body>
+</html>
