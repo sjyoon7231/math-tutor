@@ -1,11 +1,8 @@
 // data/menu.js
-// 전체 학년·학기·단원 목차 및 데이터 바구니 초기화 (window.MATH_DB로 완벽 통일!)
+// 전체 학년·학기·단원 목차 및 데이터 바구니 초기화 (4~6학년 고학년 전용 구성)
 window.MATH_DB = window.MATH_DB || {};
 
 window.MATH_DB.grades = [
-  { id: "1", name: "1학년", active: false },
-  { id: "2", name: "2학년", active: false },
-  { id: "3", name: "3학년", active: false },
   { id: "4", name: "4학년", active: false },
   { id: "5", name: "5학년", active: true },
   { id: "6", name: "6학년", active: true }
