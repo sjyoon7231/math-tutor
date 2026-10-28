@@ -676,6 +676,89 @@
       border-radius: 18px;
       padding: 22px;
     }
+    /* =========================================================
+       📱💻 기기별(스마트폰 · 태블릿 · PC) 자동 화면 최적화 (반응형 CSS)
+       ========================================================= */
+    
+    /* 1. 스마트폰 화면 (가로 767px 이하) */
+    @media screen and (max-width: 767px) {
+      body {
+        padding: 10px 8px !important;
+      }
+      .gate-card, .app-container, .container, #app-wrapper {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 18px 14px !important;
+        border-radius: 16px !important;
+      }
+      /* 좁은 화면에서는 2열 카드를 1열로 큼직하게 배치 */
+      .profile-grid, .card-grid, .choice-grid {
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+      }
+      h1, .gate-title { font-size: 21px !important; }
+      h2 { font-size: 18px !important; line-height: 1.4 !important; }
+      .question-box {
+        font-size: 17px !important;
+        padding: 16px 14px !important;
+      }
+      .btn, .btn-primary, .choice-btn, .menu-item {
+        font-size: 16px !important;
+        padding: 14px 12px !important;
+      }
+      /* 상단 배지 및 버튼 줄바꿈 허용 */
+      .top-bar, .header-bar {
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+      }
+      /* 단계별 시간표가 스마트폰 화면 밖으로 넘치지 않게 처리 */
+      .cloud-table {
+        display: block !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        font-size: 13px !important;
+      }
+    }
+
+    /* 2. 태블릿 및 폴더블폰 펼친 화면 (가로 768px ~ 1024px) */
+    @media screen and (min-width: 768px) and (max-width: 1024px) {
+      body {
+        padding: 24px !important;
+      }
+      .app-container, .container, #app-wrapper {
+        max-width: 840px !important;
+        padding: 28px 26px !important;
+      }
+      .question-box {
+        font-size: 19px !important;
+      }
+    }
+
+    /* 3. PC 모니터 및 Zoom 화면 공유 시 (가로 1025px 이상 대화면) */
+    @media screen and (min-width: 1025px) {
+      .gate-card {
+        max-width: 580px !important;
+        padding: 38px 34px !important;
+      }
+      .app-container, .container, #app-wrapper {
+        max-width: 960px !important;
+        padding: 36px 40px !important;
+      }
+      h2 { font-size: 24px !important; }
+      .question-box {
+        font-size: 21px !important;
+        padding: 24px 28px !important;
+        line-height: 1.65 !important;
+      }
+      .goal-box {
+        font-size: 16px !important;
+        padding: 16px 20px !important;
+      }
+      .btn, .btn-primary {
+        font-size: 18px !important;
+        padding: 16px 20px !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -720,10 +803,10 @@
     </div>
   </div>
 
-  <!-- 분리된 모듈 스크립트 순서대로 불러오기 (단원 데이터는 자동 로드됨) -->
-  <script src="data/menu.js"></script>
-  <script src="auth-cloud.js"></script>
-  <script src="tutor-helper.js"></script>
-  <script src="app.js"></script>
+<!-- 분리된 모듈 스크립트 순서대로 불러오기 (버전 태그로 캐시 방지) -->
+<script src="data/menu.js?v=20261028"></script>
+<script src="auth-cloud.js?v=20261028"></script>
+<script src="tutor-helper.js?v=20261028"></script>
+<script src="app.js?v=20261028"></script>
 </body>
 </html>
