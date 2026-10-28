@@ -1,6 +1,38 @@
 // =========================================================================
-// 🚀 app.js - 초등 수학 AI 자기주도 완전학습 메인 엔진 (전체 기능 복원 + 클로드·챗GPT 검수 완벽 반영 완본)
+// 🚀 app.js - 초등 수학 AI 자기주도 완전학습 메인 엔진 (최종 무결점 완본)
 // =========================================================================
+
+let viewSessionId = 0;
+let readTimerId = null;
+
+function safeEscapeHtml(s) {
+  if (typeof escapeHtml === 'function') return escapeHtml(s);
+  if (s === undefined || s === null) return '';
+  return String(s)
+    .replace(/&/g, '\x26amp;')
+    .replace(/</g, '\x26lt;')
+    .replace(/>/g, '\x26gt;')
+    .replace(/\x22/g, '\x26quot;')
+    .replace(/\x27/g, '\x26#39;');
+}
+
+function clearPendingReadTimer() {
+  if (readTimerId !== null) {
+    clearTimeout(readTimerId);
+    readTimerId = null;
+  }
+}
+
+function shuffleArray(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = copy[i];
+    copy[i] = copy[j];
+    copy[j] = temp;
+  }
+  return copy;
+}
 
 // -------------------------------------------------------------------------
 // 1. 5학년 & 6학년 모든 단원 데이터 구조 자동 해독 및 표준화 어댑터 (원본 보존형)
@@ -9,10 +41,8 @@ function normalizeQuestionItem(rawItem) {
   if (!rawItem || typeof rawItem !== 'object') return rawItem;
   if (rawItem.__normalized) return rawItem;
 
-  // ★ 원본 데이터를 절대 직접 수정하지 않도록 얕은 복사본 생성!
   const item = Object.assign({}, rawItem, { __normalized: true });
 
-  // 스몰스텝(steps) 배열 및 내부 객체도 복사본으로 생성하여 a <-> ans 통일
   if (Array.isArray(rawItem.steps)) {
     item.steps = rawItem.steps.map(st => {
       if (!st || typeof st !== 'object') return st;
@@ -23,7 +53,6 @@ function normalizeQuestionItem(rawItem) {
     });
   }
 
-  // 객관식 보기 통일: options(0부터 시작) -> choices(1부터 시작하는 문자열)
   const rawOpts = item.choices || item.options;
   if (Array.isArray(rawOpts) && rawOpts.length > 0) {
     const isZeroIndexed = !item.choices && Array.isArray(item.options);
@@ -40,7 +69,6 @@ function normalizeQuestionItem(rawItem) {
     }
   }
 
-  // 주관식 정답 키 통일: a <-> ans <-> answer (숫자 0 보존)
   if (item.ans === undefined) {
     if (item.a !== undefined) item.ans = String(item.a);
     else if (item.answer !== undefined) item.ans = String(item.answer);
@@ -49,10 +77,13 @@ function normalizeQuestionItem(rawItem) {
     item.a = String(item.ans);
   }
 
-  // 분수 정답(num/den)이 있는데 ans 문자열이 없는 경우 자동 생성
   if (item.num !== undefined && item.den !== undefined && (item.ans === undefined || item.ans === '')) {
     item.ans = item.whole ? `${item.whole}과 ${item.num}/${item.den}` : `${item.num}/${item.den}`;
     item.a = item.ans;
+  }
+
+  if ((item.num !== undefined && item.den !== undefined) && typeof item.q === 'string') {
+    item.q = item.q.replace(/\(분자\/분모\s*형식으로\s*입력\)/g, '(분자와 분모 칸에 각각 입력)');
   }
 
   return item;
@@ -65,7 +96,6 @@ function normalizeLessonObj(rawLes, fallbackCode) {
   if (!les.id && fallbackCode) les.id = fallbackCode;
   if (!les.title && les.name) les.title = les.name;
 
-  // 6학년 초기 버전 키 이름 호환 (step1 -> step1Quiz, step2 -> step2_1 등)
   if (!les.step1Quiz && les.quiz) les.step1Quiz = les.quiz;
   if (!les.step1Quiz && les.step1) les.step1Quiz = les.step1;
   if (!les.step2_1 && les.step2A) les.step2_1 = les.step2A;
@@ -82,7 +112,6 @@ function normalizeLessonObj(rawLes, fallbackCode) {
     }
   });
 
-  // 5단계 빈칸 채우기 & 3회 낭독 문장 호환 처리
   if (les.step5B && typeof les.step5B === 'object') {
     les.readSentence = les.readSentence || les.step5B.sentence || les.step5A || '';
   } else if (typeof les.step5B === 'string') {
@@ -112,7 +141,6 @@ function normalizeAllMathData() {
 
     const unitNum = unitKey.split('-')[2] || '1';
 
-    // 1) 만약 { title: "...", lessons: { ... } } 처럼 한 겹 더 감싸져 있다면 껍질 벗기기
     if (!Array.isArray(rawUnit) && typeof rawUnit === 'object') {
       if (rawUnit.lessons && typeof rawUnit.lessons === 'object') {
         rawUnit = rawUnit.lessons;
@@ -123,7 +151,6 @@ function normalizeAllMathData() {
       }
     }
 
-    // 2) 배열([ {id: "1-1", ...}, ... ]) 형태인 경우 -> lessonOrder가 있는 표준 객체로 변환
     if (Array.isArray(rawUnit)) {
       const converted = { lessonOrder: [] };
       rawUnit.forEach((les, idx) => {
@@ -136,7 +163,6 @@ function normalizeAllMathData() {
       return;
     }
 
-    // 3) 객체({ "1-1": {...}, "1-2": {...} }) 형태인 경우
     if (typeof rawUnit === 'object') {
       const metaKeys = ['lessonOrder', 'title', 'name', 'desc', 'description', 'unit', 'grade', 'semester', 'unitId', 'unitNum', 'subtitle', 'lessonTitles'];
       const validCodes = [];
@@ -185,7 +211,7 @@ function startStepTimer(stepKey) {
     state.stepTimes[state.currentStepKey] = (state.stepTimes[state.currentStepKey] || 0) + elapsed;
   }
   state.currentStepKey = stepKey;
-  state.currentStepStartTime = now;
+  state.currentStepStartTime = stepKey ? now : null;
 }
 
 function stopAllStepTimers() {
@@ -232,10 +258,9 @@ async function saveApiKey() {
   const inp = document.getElementById('api-key-input');
   if (!inp) return;
   const key = inp.value.trim();
-  localStorage.setItem('GEMINI_API_KEY', key);
   state.geminiApiKey = key;
   state.apiKey = key;
-  if (typeof db !== 'undefined' && db && key) {
+  if (typeof db !== 'undefined' && db && key && state.docId === 'MASTER_PREVIEW') {
     try {
       await db.collection('settings').doc('gemini').set({
         apiKey: key,
@@ -243,15 +268,22 @@ async function saveApiKey() {
       });
     } catch (e) {}
   }
-  alert("✅ 제미나이 API 키가 저장되었습니다!");
+  alert("✅ 제미나이 API 키가 적용되었습니다!");
   closeApiModal();
 }
 
 // -------------------------------------------------------------------------
 // 🏫 3. 학년 ➔ 학기 ➔ 단원 ➔ 차시 선택 화면
 // -------------------------------------------------------------------------
-function showGradeSelect() {
+function cleanupOnNavigation() {
+  viewSessionId++;
+  stopAllStepTimers();
+  clearPendingReadTimer();
   if (typeof resetAiTutorState === 'function') resetAiTutorState();
+}
+
+function showGradeSelect() {
+  cleanupOnNavigation();
   normalizeAllMathData();
   setHeaderUI('🎒 학년·학기 선택', false, false);
   setBreadcrumb('홈 > 학년·학기 선택');
@@ -286,7 +318,7 @@ function showGradeSelect() {
   content.innerHTML = `
     <h2>🎒 공부할 학년과 학기를 선택하세요</h2>
     <div class="goal-box">
-      <b>💡 자기주도 완전학습:</b> 공부하고 싶은 학년과 학기를 선택하면 1단원부터 6단원까지 모든 차시와 <b>10문항 실전 단원평가</b>를 자유롭게 이용할 수 있습니다.
+      <b>💡 자기주도 완전학습:</b> 공부하고 싶은 학년과 학기를 선택하면 1단원부터 6단원까지 모든 차시와 <b>실전 단원평가</b>를 자유롭게 이용할 수 있습니다.
     </div>
     <div class="card-grid">${cardsHTML}</div>
   `;
@@ -294,7 +326,7 @@ function showGradeSelect() {
 }
 
 function showUnitSelect(grade, semester) {
-  if (typeof resetAiTutorState === 'function') resetAiTutorState();
+  cleanupOnNavigation();
   normalizeAllMathData();
   state.grade = String(grade);
   state.semester = String(semester);
@@ -360,7 +392,7 @@ function showUnitSelect(grade, semester) {
 }
 
 function showLessonSelect(grade, semester, unit) {
-  if (typeof resetAiTutorState === 'function') resetAiTutorState();
+  cleanupOnNavigation();
   normalizeAllMathData();
   state.grade = String(grade);
   state.semester = String(semester);
@@ -387,6 +419,11 @@ function showLessonSelect(grade, semester, unit) {
     ? unitLessons.lessonOrder
     : Object.keys(unitLessons).filter(k => k !== 'lessonOrder' && isLikelyLessonObject(unitLessons[k]));
 
+  const examPoolCount = order.reduce((sum, code) => {
+    const les = unitLessons[code];
+    return sum + ((les && Array.isArray(les.step3A)) ? les.step3A.length : 0);
+  }, 0);
+
   const itemsHTML = order.map((code, idx) => {
     const les = unitLessons[code];
     if (!les) return '';
@@ -395,12 +432,12 @@ function showLessonSelect(grade, semester, unit) {
 
     let badgeHTML = `<span class="menu-arrow">학습 시작 👉</span>`;
     if (rec && rec.status === '완료') {
-      badgeHTML = `<span class="complete-badge">💮 완료 (${rec.score || 100}점)</span>`;
+      const initTag = (rec.initialScore !== undefined && rec.initialScore < 100) ? ` (초기 ${rec.initialScore}점➔보충완료)` : ` (${rec.score || 100}점)`;
+      badgeHTML = `<span class="complete-badge">💮 완료${initTag}</span>`;
     } else if (rec) {
       badgeHTML = `<span class="review-badge">🔄 복습 권장 (${rec.score || 0}점)</span>`;
     }
 
-    // ★ "[4-1차시] 차시: 비의 성질을 알아볼까요"처럼 '차시:'가 두 번 나오는 현상 깔끔히 제거!
     const cleanTitle = String(les.title || `${code}차시`).replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
 
     return `
@@ -423,14 +460,14 @@ function showLessonSelect(grade, semester, unit) {
   content.innerHTML = `
     <h2>📘 ${unitTitle}</h2>
     <div class="goal-box">
-      차시를 순서대로 공부하거나 부족한 차시를 골라 학습하세요. 맨 아래의 <b>[🏆 10문항 실전 단원평가 모의고사]</b>는 언제든 응시할 수 있으며, 누를 때마다 새로운 10문항 시험지가 만들어집니다!
+      차시를 순서대로 공부하거나 부족한 차시를 골라 학습하세요. 맨 아래의 <b>[🏆 10문항 실전 단원평가 모의고사]</b>는 언제든 응시할 수 있으며, 누를 때마다 새로운 시험지가 만들어집니다!
     </div>
     <div class="menu-list">${itemsHTML}</div>
 
     <button type="button" class="exam-banner" onclick="startUnitExam()">
       <div>
-        <div class="exam-title">🏆 실전 단원평가 모의고사 (10문항 랜덤 출제 · 상시 오픈)</div>
-        <div class="exam-sub">1~6차시 전체 문제 풀(84문항)에서 골고루 출제 · 오답 즉시 1:1 쌍둥이 클리닉 제공</div>
+        <div class="exam-title">🏆 실전 단원평가 모의고사 (10문항 균등 출제 · 상시 오픈)</div>
+        <div class="exam-sub">1~${order.length}차시 실력 문제 풀(${examPoolCount}문항)에서 차시별로 골고루 출제 · 오답 즉시 1:1 쌍둥이 클리닉 제공</div>
       </div>
       ${examBadge}
     </button>
@@ -448,7 +485,7 @@ function showLessonSelect(grade, semester, unit) {
 // 🎬 4. 차시 학습 진행: 워밍업 ➔ 1단계(영상 + 퀴즈) ➔ 2단계(함께/혼자)
 // -------------------------------------------------------------------------
 function startLesson(lessonId) {
-  if (typeof resetAiTutorState === 'function') resetAiTutorState();
+  cleanupOnNavigation();
   normalizeAllMathData();
   state.lessonId = lessonId;
   state.lessonData = MATH_DB.lessons[state.unitKey][lessonId];
@@ -459,6 +496,7 @@ function startLesson(lessonId) {
   state.bRetryQueue = [];
   state.bResults = [];
   state.bDetailedLogs = [];
+  state.usedHelpInLesson = false;
   state.lessonStartTime = Date.now();
   state.stepTimes = {};
   state.currentStepKey = null;
@@ -598,11 +636,49 @@ function startStep2_2() {
 }
 
 // -------------------------------------------------------------------------
-// 🧩 5. 양방향 문제 풀이 렌더러 (분수 위젯 + 오답 진단 + 스몰스텝 + AI 튜터)
+// 🧩 5. 양방향 문제 풀이 렌더러 & 정교한 수학 동치 채점기
 // -------------------------------------------------------------------------
+// ★ 대분수 문자열("1과 1/2")로만 저장된 문제도 분수 문제로 정확히 인식!
 function isFractionProblem(item) {
-  return (item.num !== undefined && item.den !== undefined) ||
-         (typeof item.ans === 'string' && /^\d+\/\d+$/.test(item.ans.trim()));
+  if (!item || typeof item !== 'object') return false;
+  if (item.num !== undefined && item.den !== undefined) return true;
+  if (typeof item.ans === 'string') {
+    const s = item.ans.trim();
+    return /^(?:\d+\s*[과와]\s*)?\d+\s*\/\s*\d+$/.test(s);
+  }
+  return false;
+}
+
+function parseFractionParts(str) {
+  if (str === undefined || str === null) return null;
+  const s = String(str).trim();
+  const mixed = s.match(/^(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) {
+    const w = parseInt(mixed[1], 10);
+    const n = parseInt(mixed[2], 10);
+    const d = parseInt(mixed[3], 10);
+    if (d === 0) return null;
+    return { w, n, d, totalNum: w * d + n, den: d };
+  }
+  const simple = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (simple) {
+    const n = parseInt(simple[1], 10);
+    const d = parseInt(simple[2], 10);
+    if (d === 0) return null;
+    return { w: 0, n, d, totalNum: n, den: d };
+  }
+  return null;
+}
+
+function calcGcd(a, b) {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b > 0) {
+    const t = a % b;
+    a = b;
+    b = t;
+  }
+  return a || 1;
 }
 
 function buildAnswerInputHTML(item, prefix = 'ans') {
@@ -644,40 +720,99 @@ function readUserAnswerFromDOM(item, prefix = 'ans') {
     const n = (document.getElementById(`${prefix}-num`)?.value || '').trim();
     const d = (document.getElementById(`${prefix}-den`)?.value || '').trim();
     if (!n || !d) return '';
-    return w ? `${w}과 ${n}/${d}` : `${n}/${d}`;
+    return (w && w !== '0') ? `${w}과 ${n}/${d}` : `${n}/${d}`;
   }
   return (document.getElementById(`${prefix}-input`)?.value || '').trim();
 }
 
+// ★ 분수 조건별 채점(특정 분모 지정, 기약분수 여부, 대분수/가분수 동치) 및 명시적 속성 완벽 지원!
 function checkAnswerMatch(userVal, item) {
   if (userVal === undefined || userVal === null || String(userVal).trim() === '') return false;
-  const cleanUser = normalizeMathText(userVal);
 
-  if (isFractionProblem(item)) {
-    let targetW = item.whole ? String(item.whole).trim() : '';
-    let targetN = item.num !== undefined ? String(item.num).trim() : '';
-    let targetD = item.den !== undefined ? String(item.den).trim() : '';
-    if ((!targetN || !targetD) && typeof item.ans === 'string' && item.ans.includes('/')) {
-      const parts = item.ans.trim().split('/');
-      targetN = parts[0];
-      targetD = parts[1];
-    }
-    const expected = targetW ? `${targetW}과${targetN}/${targetD}` : `${targetN}/${targetD}`;
-    if (cleanUser === normalizeMathText(expected)) return true;
-    if (!targetW && cleanUser === `0과${targetN}/${targetD}`) return true;
-  }
+  const commaCleanedUser = String(userVal).replace(/(\d),(?=\d{3}(?!\d))/g, '$1').trim();
+  const cleanUser = normalizeMathText(commaCleanedUser);
 
-  const target = normalizeMathText(String(item.ans ?? item.a ?? ''));
-  if (cleanUser === target) return true;
-  if (item.unit && cleanUser === normalizeMathText(`${item.ans}${item.unit}`)) return true;
+  const targetStr = String(item.ans ?? item.a ?? '').replace(/(\d),(?=\d{3}(?!\d))/g, '$1').trim();
+  const normTarget = normalizeMathText(targetStr);
 
+  // 1) 기본 정답 텍스트 및 accept(명시적 허용 답안) 최우선 검사!
+  if (cleanUser === normTarget) return true;
+  if (item.unit && cleanUser === normalizeMathText(`${targetStr}${item.unit}`)) return true;
   if (Array.isArray(item.accept)) {
-    if (item.accept.some(ac => cleanUser === normalizeMathText(String(ac)))) return true;
+    if (item.accept.some(ac => cleanUser === normalizeMathText(String(ac).replace(/(\d),(?=\d{3}(?!\d))/g, '$1')))) {
+      return true;
+    }
   }
+
+  // 2) 분수 문제 정밀 채점
+  if (isFractionProblem(item)) {
+    let targetW = item.whole ? parseInt(item.whole, 10) : 0;
+    let targetN = item.num !== undefined ? parseInt(item.num, 10) : null;
+    let targetD = item.den !== undefined ? parseInt(item.den, 10) : null;
+
+    if ((targetN === null || targetD === null) && typeof item.ans === 'string') {
+      const parsedT = parseFractionParts(item.ans);
+      if (parsedT) {
+        targetW = parsedT.w;
+        targetN = parsedT.n;
+        targetD = parsedT.den;
+      }
+    }
+
+    const userFrac = parseFractionParts(commaCleanedUser);
+    if (userFrac && targetN !== null && targetD !== null && targetD > 0) {
+      const targetTotalNum = targetW * targetD + targetN;
+      const isSameValue = (userFrac.totalNum * targetD === targetTotalNum * userFrac.den);
+      if (isSameValue) {
+        const qText = String(item.q || '');
+
+        // (A) 특정 분모가 지정된 문제(예: "분모가 4인 분수" 또는 requiredDenominator 속성)이거나,
+        // 원래 정답 자체가 약분되지 않은 분수(예: 통분 과정의 2/4)인 경우에는 분모가 정확히 일치해야 함!
+        const denMatch = qText.match(/분모가\s*(\d+)\s*인/);
+        const reqDen = item.requiredDenominator !== undefined
+          ? Number(item.requiredDenominator)
+          : (denMatch ? parseInt(denMatch[1], 10) : null);
+
+        if (reqDen !== null && userFrac.den !== reqDen) {
+          return false;
+        }
+
+        const targetIsReduced = (calcGcd(targetN, targetD) === 1);
+        const userIsReduced = (calcGcd(userFrac.n, userFrac.den) === 1);
+
+        // 원래 정답이 약분되지 않은 분수(예: 2/4)라면 그 분모(4)를 그대로 써야 정답 인정 ("3/6" 오답 처리)
+        if (!targetIsReduced && userFrac.den !== targetD) {
+          return false;
+        }
+
+        // (B) 기약분수(약분) 요구 여부 판별 ("통분" 예외 제거, "크기가 같은 분수"만 예외 허용)
+        const requiresReduced = item.requireReduced !== undefined
+          ? Boolean(item.requireReduced)
+          : (/기약분수|약분/.test(qText) || (targetIsReduced && !/크기가\s*같은\s*분수/.test(qText)));
+
+        if (requiresReduced && !userIsReduced) return false;
+
+        // (C) 대분수 / 가분수 형태 제한 확인
+        if ((item.answerForm === 'mixed' || /대분수로/.test(qText)) && targetW > 0 && userFrac.w === 0) return false;
+        if ((item.answerForm === 'improper' || /가분수로/.test(qText)) && targetW === 0 && userFrac.w > 0) return false;
+        if (userFrac.w > 0 && userFrac.n >= userFrac.den) return false;
+
+        return true;
+      }
+    }
+  }
+
+  // 3) 순수 소수/자연수 수치 동치 확인 (예: 정답 "0.5"에 학생이 "0.50" 입력 시 정답 인정)
+  const strippedUser = item.unit ? cleanUser.replace(new RegExp(normalizeMathText(item.unit) + '$'), '') : cleanUser;
+  if (/^-?\d+(\.\d+)?$/.test(strippedUser) && /^-?\d+(\.\d+)?$/.test(normTarget)) {
+    if (Number(strippedUser) === Number(normTarget)) {
+      return true;
+    }
+  }
+
   return false;
 }
 
-// ★ 클로드 3번 지적 반영: 새 문제를 그릴 때마다 resetAiTutorState()를 호출하여 이전 AI 응답 오염을 완벽 차단!
 function renderInteractivePractice(stageTitle, goalDesc, item, onNextCallback) {
   if (typeof resetAiTutorState === 'function') {
     resetAiTutorState();
@@ -740,6 +875,7 @@ function handleInteractiveResult(isRight, userVal) {
     return;
   }
 
+  state.usedHelpInLesson = true;
   const rawKey = String(userVal).replace(/[^0-9./-]/g, '');
   const specificDiag = (item.wrongDiag && (item.wrongDiag[userVal] || item.wrongDiag[rawKey])) || '';
 
@@ -871,14 +1007,14 @@ function showStep3ResultReport() {
           ${idx + 1}번 문제: ${isRight ? '<span style="color:#16a34a;">⭕ 정답입니다!</span>' : '<span style="color:#dc2626;">❌ 아쉽게 틀렸어요</span>'}
         </div>
         <div style="font-size:15px; color:#334155; margin-bottom:8px;">${item.q}</div>
-        <div>• <b>내가 쓴 답:</b> ${userVal}${item.unit || ''} ${!isRight ? `/ <b>바른 정답:</b> <span style="color:#dc2626; font-weight:bold;">${item.ans}${item.unit || ''}</span>` : ''}</div>
+        <div>• <b>내가 쓴 답:</b> ${safeEscapeHtml(userVal)}${item.unit || ''} ${!isRight ? `/ <b>바른 정답:</b> <span style="color:#dc2626; font-weight:bold;">${safeEscapeHtml(item.ans)}${item.unit || ''}</span>` : ''}</div>
         ${diag ? `<div style="margin-top:6px; color:#b45309; font-weight:bold;">📌 족집게 오답 진단: ${diag}</div>` : ''}
         ${!isRight ? `<div style="margin-top:6px; color:#1e3a8a;">💡 <b>차근차근 풀이:</b> ${item.h2 || item.h1 || ''}</div>` : ''}
       </div>
     `;
   }).join('');
 
-  state.score = Math.round((rightCnt / state.step3Questions.length) * 100);
+  state.score = Math.round((rightCnt / Math.max(1, state.step3Questions.length)) * 100);
   updateScoreBoard(`3단계 결과: ${state.score}점`);
 
   const nextActionBtn = state.wrongIndices.length > 0
@@ -919,7 +1055,12 @@ function runNextTwinProblem() {
     twinItem,
     () => {
       state.bResults.push('⭕');
-      state.bDetailedLogs.push({ origNum: origIdx + 1, status: '쌍둥이 통과' });
+      state.bDetailedLogs.push({
+        origNum: origIdx + 1,
+        attempts: state.attempt,
+        usedSmallStepOrAI: state.attempt > 2,
+        status: '쌍둥이 통과'
+      });
       state.bCursor++;
       runNextTwinProblem();
     }
@@ -946,19 +1087,34 @@ function startStep5WrapUp() {
 }
 
 function renderStep5BlankPuzzle(s5b) {
-  state.s5TargetWords = [...s5b.blankWords];
+  const sentence = String(s5b.sentence || '');
+
+  const positionedWords = [];
+  const rawWords = [...s5b.blankWords];
+
+  rawWords.forEach(w => {
+    const pos = sentence.indexOf(w);
+    if (pos !== -1) {
+      positionedWords.push({ word: w, pos });
+    }
+  });
+  positionedWords.sort((a, b) => a.pos - b.pos);
+
+  state.s5TargetWords = positionedWords.length > 0
+    ? positionedWords.map(p => p.word)
+    : [...s5b.blankWords];
   state.s5SelectedWords = [];
 
-  let displaySentence = s5b.sentence;
+  let displaySentence = sentence;
   state.s5TargetWords.forEach((w, idx) => {
     displaySentence = displaySentence.replace(w, `<span id="s5-slot-${idx}" style="display:inline-block; min-width:74px; padding:2px 10px; margin:0 4px; border-bottom:3px solid #2563eb; background:#dbeafe; color:#1e3a8a; border-radius:6px; font-weight:800; text-align:center;">( 빈칸 ${idx + 1} )</span>`);
   });
 
-  const wordPool = [...s5b.blankWords, ...(s5b.distractors || [])].sort(() => Math.random() - 0.5);
+  const wordPool = shuffleArray([...state.s5TargetWords, ...(s5b.distractors || [])]);
 
   const wordBtnsHTML = wordPool.map((w, i) => `
-    <button type="button" id="s5-word-btn-${i}" class="choice-btn" style="text-align:center; padding:12px 16px;" onclick="selectStep5Word('${w}', ${i})">
-      🧩 ${w}
+    <button type="button" id="s5-word-btn-${i}" class="choice-btn" style="text-align:center; padding:12px 16px;" onclick="selectStep5Word('${safeEscapeHtml(w)}', ${i})">
+      🧩 ${safeEscapeHtml(w)}
     </button>
   `).join('');
 
@@ -966,7 +1122,7 @@ function renderStep5BlankPuzzle(s5b) {
   content.innerHTML = `
     <h2>🧩 5-1단계: 오늘의 핵심 문장 빈칸 채우기</h2>
     <div class="goal-box">
-      <b>💡 핵심 개념 완성:</b> 아래 문장의 <b>( 빈칸 1 ), ( 빈칸 2 )...</b>에 들어갈 알맞은 낱말 카드를 순서대로 터치하여 문장을 완성해 보세요!
+      <b>💡 핵심 개념 완성:</b> 아래 문장의 <b>( 빈칸 1 ), ( 빈칸 2 )...</b>에 들어갈 알맞은 낱말 카드를 문장 순서대로 터치하여 완성해 보세요!
     </div>
     ${state.lessonData.step5A ? `<div class="summary-card" style="margin-bottom:14px;">📌 <b>개념 힌트:</b> ${state.lessonData.step5A}</div>` : ''}
     <div class="read-sentence-box" style="background:#eff6ff; border-color:#3b82f6; color:#1e293b;">
@@ -1016,6 +1172,7 @@ function selectStep5Word(word, btnIdx) {
 }
 
 function renderStep5ReadAloud() {
+  clearPendingReadTimer();
   setHeaderUI(`5단계: 마무리 3회 낭독`, true, true);
   updateScoreBoard('5단계 3회 낭독');
 
@@ -1045,6 +1202,7 @@ function clickReadAloud(stepNum) {
   if (state.readLock || stepNum !== state.readCount + 1) return;
   state.readCount = stepNum;
   state.readLock = true;
+  const mySession = viewSessionId;
 
   const curBtn = document.getElementById(`read-btn-${stepNum}`);
   if (curBtn) {
@@ -1055,13 +1213,15 @@ function clickReadAloud(stepNum) {
   const nextBtn = document.getElementById(`read-btn-${stepNum + 1}`);
   if (nextBtn) {
     nextBtn.innerText = `⏳ 소리 내어 읽는 중... (잠시만 기다려 주세요)`;
-    setTimeout(() => {
+    readTimerId = setTimeout(() => {
+      if (mySession !== viewSessionId) return;
       state.readLock = false;
       nextBtn.className = 'read-btn active';
       nextBtn.innerText = `🔊 ${stepNum + 1}번째 소리 내어 읽었어요! (터치)`;
     }, 1200);
   } else {
-    setTimeout(() => {
+    readTimerId = setTimeout(() => {
+      if (mySession !== viewSessionId) return;
       state.readLock = false;
       showFinalLessonReport();
     }, 500);
@@ -1070,28 +1230,46 @@ function clickReadAloud(stepNum) {
 
 async function showFinalLessonReport() {
   stopAllStepTimers();
+  const mySession = viewSessionId;
+
+  const snapUnitKey = state.unitKey;
+  const snapLessonId = state.lessonId;
+  const snapGrade = state.grade;
+  const snapSem = state.semester;
+  const snapUnit = state.unit;
+  const snapStudentName = state.studentName || '';
+  const snapInitialScore = state.score;
+  const snapRecords = [...state.records];
+  const snapStepTimes = Object.assign({}, state.stepTimes);
+  const snapTwinLogs = [...(state.bDetailedLogs || [])];
+  const snapCleanTitle = String(state.lessonData?.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
+
+  const finalStatus = (snapInitialScore === 100 || state.bResults.length >= state.wrongIndices.length) ? '완료' : '복습필요';
+  const finalScore = finalStatus === '완료' ? 100 : snapInitialScore;
+
   setHeaderUI(`🎉 차시 완전학습 달성!`, true, true);
   updateScoreBoard('학습 완료!');
 
-  const finalStatus = (state.score === 100 || state.bResults.length >= state.wrongIndices.length) ? '완료' : '복습필요';
-  const finalScore = finalStatus === '완료' ? 100 : state.score;
-
-  await saveStudyRecord(state.unitKey, state.lessonId, finalScore, finalStatus, {
-    step3Records: state.records,
-    stepTimes: state.stepTimes
+  await saveStudyRecord(snapUnitKey, snapLessonId, finalScore, finalStatus, {
+    initialScore: snapInitialScore,
+    step3Records: snapRecords,
+    twinClinicLogs: snapTwinLogs,
+    usedHelpInLesson: Boolean(state.usedHelpInLesson),
+    stepTimes: snapStepTimes
   });
 
-  const st = state.stepTimes || {};
-  const totalSec = Object.values(st).reduce((a, b) => a + b, 0);
-  const cleanTitle = String(state.lessonData.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
+  if (mySession !== viewSessionId) return;
+
+  const totalSec = Object.values(snapStepTimes).reduce((a, b) => a + b, 0);
 
   const content = document.getElementById('app-content');
   content.innerHTML = `
-    <h2>🎉 [${state.lessonId}차시] ${cleanTitle} 완전학습 리포트</h2>
+    <h2>🎉 [${snapLessonId}차시] ${snapCleanTitle} 완전학습 리포트</h2>
     <div class="report-card">
-      <div>👦 <b>학생 이름:</b> ${state.studentName} (${state.grade}학년 ${state.semester}학기)</div>
-      <div>📘 <b>완료 차시:</b> ${state.unit}단원 [${state.lessonId}] ${cleanTitle}</div>
-      <div>🎯 <b>3단계 실력 확인:</b> ${state.records.join(' ')} (초기 ${state.score}점 ➔ 쌍둥이 클리닉 후 <b>${finalScore}점 완전학습!</b>)</div>
+      <div>👦 <b>학생 이름:</b> ${safeEscapeHtml(snapStudentName)} (${snapGrade}학년 ${snapSem}학기)</div>
+      <div>📘 <b>완료 차시:</b> ${snapUnit}단원 [${snapLessonId}] ${snapCleanTitle}</div>
+      <div>🎯 <b>3단계 최초 실력 점수:</b> ${snapRecords.join(' ')} (<b>${snapInitialScore}점</b>)</div>
+      <div>💮 <b>쌍둥이 클리닉 후 최종 상태:</b> <b style="color:#16a34a;">${finalStatus === '완료' ? '완전학습 달성 (100% 보충 완료!)' : '복습 권장'}</b></div>
       <div>⏱️ <b>총 학습 소요 시간:</b> ${formatSec(totalSec)}</div>
       <div style="margin-top:12px;">
         <table class="cloud-table">
@@ -1107,51 +1285,54 @@ async function showFinalLessonReport() {
           </thead>
           <tbody>
             <tr>
-              <td>${st.warmup ? formatSec(st.warmup) : '-'}</td>
-              <td>${st.step1 ? formatSec(st.step1) : '-'}</td>
-              <td>${st.step2 ? formatSec(st.step2) : '-'}</td>
-              <td>${st.step3 ? formatSec(st.step3) : '-'}</td>
-              <td>${st.step4 ? formatSec(st.step4) : '통과'}</td>
-              <td>${st.step5 ? formatSec(st.step5) : '-'}</td>
+              <td>${snapStepTimes.warmup ? formatSec(snapStepTimes.warmup) : '-'}</td>
+              <td>${snapStepTimes.step1 ? formatSec(snapStepTimes.step1) : '-'}</td>
+              <td>${snapStepTimes.step2 ? formatSec(snapStepTimes.step2) : '-'}</td>
+              <td>${snapStepTimes.step3 ? formatSec(snapStepTimes.step3) : '-'}</td>
+              <td>${snapStepTimes.step4 ? formatSec(snapStepTimes.step4) : '통과'}</td>
+              <td>${snapStepTimes.step5 ? formatSec(snapStepTimes.step5) : '-'}</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
     <button type="button" class="btn btn-share" onclick="copyLessonReportToClipboard('${finalScore}', '${formatSec(totalSec)}')">📋 학부모님께 카톡으로 결과 보고서 복사하기</button>
-    <button type="button" class="btn" onclick="showLessonSelect('${state.grade}', '${state.semester}', '${state.unit}')">📋 차시 목록으로 돌아가기 👉</button>
+    <button type="button" class="btn" onclick="showLessonSelect('${snapGrade}', '${snapSem}', '${snapUnit}')">📋 차시 목록으로 돌아가기 👉</button>
   `;
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function copyLessonReportToClipboard(finalScore, timeStr) {
-  const cleanTitle = String(state.lessonData.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
+  const cleanTitle = String(state.lessonData?.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
   const text = [
     `📊 [초등 수학 AI 완전학습 완료 보고서]`,
     `• 학생: ${state.studentName} (${state.grade}학년 ${state.semester}학기)`,
     `• 단원/차시: ${state.unit}단원 [${state.lessonId}] ${cleanTitle}`,
-    `• 3단계 실력 확인: ${state.records.join(' ')} (초기 ${state.score}점)`,
-    `• 최종 성취도: ${finalScore}점 (쌍둥이 보충 및 3회 낭독 완료)`,
+    `• 3단계 최초 실력 확인: ${state.records.join(' ')} (초기 ${state.score}점)`,
+    `• 보충 학습 후 성취도: ${finalScore}점 (쌍둥이 클리닉 및 3회 낭독 완료)`,
     `• 총 학습 시간: ${timeStr}`,
     `• 완료 일시: ${new Date().toLocaleString()}`
   ].join('\n');
 
   navigator.clipboard.writeText(text).then(() => {
     alert("✅ 카카오톡에 바로 붙여넣을 수 있도록 학습 완료 보고서가 복사되었습니다!");
+  }).catch(() => {
+    alert("복사하지 못했습니다. 화면의 결과를 길게 눌러 직접 복사해 주세요.");
   });
 }
 
 // -------------------------------------------------------------------------
-// 🏆 8. 10문항 실전 단원평가 모의고사 & 오답 즉시 쌍둥이 재도전 클리닉
+// 🏆 8. 10문항 실전 단원평가 모의고사
 // -------------------------------------------------------------------------
 function startUnitExam() {
-  if (typeof resetAiTutorState === 'function') resetAiTutorState();
+  cleanupOnNavigation();
   normalizeAllMathData();
   const unitLessons = MATH_DB.lessons[state.unitKey];
   if (!unitLessons) return;
 
   const order = unitLessons.lessonOrder || Object.keys(unitLessons).filter(k => k !== 'lessonOrder' && isLikelyLessonObject(unitLessons[k]));
-  let pool = [];
+  const bucketsByLesson = [];
+  let remainingPool = [];
 
   order.forEach(code => {
     const les = unitLessons[code];
@@ -1159,29 +1340,34 @@ function startUnitExam() {
     const cleanTitle = String(les.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
     const aList = les.step3A || [];
     const bList = les.step4B || [];
-    aList.forEach((qItem, idx) => {
-      pool.push({
-        lessonCode: code,
-        lessonTitle: cleanTitle,
-        qItem: normalizeQuestionItem(qItem),
-        twinItem: normalizeQuestionItem(bList[idx] || qItem)
-      });
-    });
+    const lessonItems = aList.map((qItem, idx) => ({
+      lessonCode: code,
+      lessonTitle: cleanTitle,
+      qItem: normalizeQuestionItem(qItem),
+      twinItem: normalizeQuestionItem(bList[idx] || qItem)
+    }));
+
+    if (lessonItems.length > 0) {
+      const shuffledLessonItems = shuffleArray(lessonItems);
+      bucketsByLesson.push(shuffledLessonItems[0]);
+      remainingPool = remainingPool.concat(shuffledLessonItems.slice(1));
+    }
   });
 
-  if (pool.length === 0) {
+  const combined = shuffleArray(bucketsByLesson).concat(shuffleArray(remainingPool));
+  if (combined.length === 0) {
     alert("단원평가 문항을 불러올 수 없습니다.");
     return;
   }
 
-  pool.sort(() => Math.random() - 0.5);
-  state.examQuestions = pool.slice(0, 10);
+  state.examQuestions = shuffleArray(combined.slice(0, 10));
   state.examIdx = 0;
+  state.examCorrectCount = 0;
   state.examScore = 0;
   state.examWrongList = [];
   state.examStartTime = Date.now();
 
-  setHeaderUI(`🏆 실전 단원평가 (10문항)`, true, true);
+  setHeaderUI(`🏆 실전 단원평가 (${state.examQuestions.length}문항)`, true, true);
   renderExamQuestion();
 }
 
@@ -1246,7 +1432,7 @@ function submitExamAnswer(choiceVal) {
     : checkAnswerMatch(userVal, item);
 
   if (isRight) {
-    state.examScore += 10;
+    state.examCorrectCount = (state.examCorrectCount || 0) + 1;
   } else {
     state.examWrongList.push({
       qNum: state.examIdx + 1,
@@ -1267,20 +1453,36 @@ function submitExamAnswer(choiceVal) {
 }
 
 async function finishUnitExam() {
+  const mySession = viewSessionId;
+  const totalQ = Math.max(1, state.examQuestions.length);
+  const rightQ = totalQ - state.examWrongList.length;
+  state.examScore = Math.round((rightQ / totalQ) * 100);
+
+  const snapUnitKey = state.unitKey;
+  const snapGrade = state.grade;
+  const snapSem = state.semester;
+  const snapUnit = state.unit;
+  const snapStudentName = state.studentName || '';
+  const snapScore = state.examScore;
+  const snapWrongList = [...state.examWrongList];
   const examElapsedSec = Math.max(1, Math.round((Date.now() - (state.examStartTime || Date.now())) / 1000));
-  await saveStudyRecord(state.unitKey, 'EXAM', state.examScore, '완료', {
-    wrongCount: state.examWrongList.length,
+
+  await saveStudyRecord(snapUnitKey, 'EXAM', snapScore, '완료', {
+    totalQuestions: totalQ,
+    wrongCount: snapWrongList.length,
     examTimeSec: examElapsedSec
   });
-  updateScoreBoard(`단원평가: ${state.examScore}점`);
 
-  const wrongHTML = state.examWrongList.map(w => {
+  if (mySession !== viewSessionId) return;
+  updateScoreBoard(`단원평가: ${snapScore}점`);
+
+  const wrongHTML = snapWrongList.map(w => {
     const rawKey = String(w.userVal).replace(/[^0-9./-]/g, '');
     const diag = (w.qItem.wrongDiag && (w.qItem.wrongDiag[w.userVal] || w.qItem.wrongDiag[rawKey])) || '';
     return `
       <div class="wrong-note-card">
         <div style="font-weight:800; color:#dc2626; margin-bottom:6px;">
-          ❌ ${w.qNum}번 오답 [${w.lessonCode}차시] (내가 쓴 답: ${w.userVal}${w.qItem.unit || ''} / 정답: ${w.qItem.ans}${w.qItem.unit || ''})
+          ❌ ${w.qNum}번 오답 [${w.lessonCode}차시] (내가 쓴 답: ${safeEscapeHtml(w.userVal)}${w.qItem.unit || ''} / 정답: ${safeEscapeHtml(w.qItem.ans)}${w.qItem.unit || ''})
         </div>
         <div style="font-size:15px; margin-bottom:6px;">${w.qItem.q}</div>
         ${diag ? `<div style="color:#b45309; font-weight:bold; font-size:14px; margin-bottom:4px;">📌 내가 틀린 까닭: ${diag}</div>` : ''}
@@ -1291,32 +1493,32 @@ async function finishUnitExam() {
 
   const content = document.getElementById('app-content');
   content.innerHTML = `
-    <h2>🏆 ${state.grade}학년 ${state.semester}학기 ${state.unit}단원 실전 단원평가 성적표</h2>
+    <h2>🏆 ${snapGrade}학년 ${snapSem}학기 ${snapUnit}단원 실전 단원평가 성적표</h2>
     <div class="report-card">
-      <div style="font-size:20px; font-weight:800; color:#2563eb; margin-bottom:6px;">🎯 최종 점수: ${state.examScore}점 (10문항 중 ${10 - state.examWrongList.length}문항 정답)</div>
-      <div>👦 <b>응시 학생:</b> ${state.studentName} · ⏱️ <b>소요 시간:</b> ${formatSec(examElapsedSec)}</div>
+      <div style="font-size:20px; font-weight:800; color:#2563eb; margin-bottom:6px;">🎯 최종 점수: ${snapScore}점 (${totalQ}문항 중 ${rightQ}문항 정답)</div>
+      <div>👦 <b>응시 학생:</b> ${safeEscapeHtml(snapStudentName)} · ⏱️ <b>소요 시간:</b> ${formatSec(examElapsedSec)}</div>
     </div>
-    ${state.examWrongList.length === 0
-      ? `<div class="report-card" style="background:#dcfce7; border-color:#22c55e; color:#14532d; font-weight:bold;">🎉 축하합니다! 10문제를 모두 맞혀 이 단원을 완벽히 마스터했어요!</div>`
-      : `<h3>📒 나의 단원평가 오답 노트 (${state.examWrongList.length}문항)</h3>
+    ${snapWrongList.length === 0
+      ? `<div class="report-card" style="background:#dcfce7; border-color:#22c55e; color:#14532d; font-weight:bold;">🎉 축하합니다! ${totalQ}문제를 모두 맞혀 이 단원을 완벽히 마스터했어요!</div>`
+      : `<h3>📒 나의 단원평가 오답 노트 (${snapWrongList.length}문항)</h3>
          ${wrongHTML}
-         <button type="button" class="btn" style="background:#d97706;" onclick="startExamTwinClinic()">🔥 틀린 ${state.examWrongList.length}문제만 쌍둥이 문제로 즉시 다시 풀기 👉</button>`
+         <button type="button" class="btn" style="background:#d97706;" onclick="startExamTwinClinic()">🔥 틀린 ${snapWrongList.length}문제만 쌍둥이 문제로 즉시 다시 풀기 👉</button>`
     }
-    <button type="button" class="btn btn-share" onclick="copyExamReportToClipboard('${state.examScore}', '${formatSec(examElapsedSec)}')">📋 학부모님께 카톡으로 단원평가 성적표 복사하기</button>
-    <button type="button" class="btn btn-secondary" onclick="showLessonSelect('${state.grade}', '${state.semester}', '${state.unit}')">📋 차시 목록으로 돌아가기</button>
+    <button type="button" class="btn btn-share" onclick="copyExamReportToClipboard('${snapScore}', '${formatSec(examElapsedSec)}', '${totalQ}')">📋 학부모님께 카톡으로 단원평가 성적표 복사하기</button>
+    <button type="button" class="btn btn-secondary" onclick="showLessonSelect('${snapGrade}', '${snapSem}', '${snapUnit}')">📋 차시 목록으로 돌아가기</button>
   `;
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function copyExamReportToClipboard(score, timeStr) {
+function copyExamReportToClipboard(score, timeStr, totalQ = 10) {
   const wrongSummary = state.examWrongList.length === 0
-    ? '없음 (10문항 전체 정답 만점!)'
+    ? `없음 (${totalQ}문항 전체 정답 만점!)`
     : state.examWrongList.map(w => `${w.qNum}번(${w.lessonCode}차시)`).join(', ');
 
   const text = [
     `🏆 [초등 수학 AI 실전 단원평가 성적표]`,
     `• 학생: ${state.studentName} (${state.grade}학년 ${state.semester}학기)`,
-    `• 응시 단원: ${state.unit}단원 실전 모의고사 (10문항)`,
+    `• 응시 단원: ${state.unit}단원 실전 모의고사 (${totalQ}문항)`,
     `• 획득 점수: ${score}점 / 100점`,
     `• 보충 필요 문항: ${wrongSummary}`,
     `• 소요 시간: ${timeStr}`,
@@ -1325,6 +1527,8 @@ function copyExamReportToClipboard(score, timeStr) {
 
   navigator.clipboard.writeText(text).then(() => {
     alert("✅ 카카오톡에 바로 붙여넣을 수 있도록 단원평가 성적표가 복사되었습니다!");
+  }).catch(() => {
+    alert("복사하지 못했습니다. 화면의 결과를 길게 눌러 직접 복사해 주세요.");
   });
 }
 
@@ -1352,14 +1556,15 @@ function runNextExamTwin() {
 }
 
 // -------------------------------------------------------------------------
-// 🚀 9. 앱 초기 기동 (study.html 열릴 때 자동 실행)
+// 🚀 9. 앱 초기 기동 (로그인 검증을 먼저 통과한 경우에만 API 키를 불러오도록 순서 변경!)
 // -------------------------------------------------------------------------
 window.addEventListener('DOMContentLoaded', async () => {
   normalizeAllMathData();
-  if (typeof loadCloudApiKey === 'function') {
-    await loadCloudApiKey();
-  }
+  let authOk = false;
   if (typeof showAuthScreen === 'function') {
-    await showAuthScreen();
+    authOk = await showAuthScreen();
+  }
+  if (authOk && state.docId && typeof loadCloudApiKey === 'function') {
+    await loadCloudApiKey();
   }
 });

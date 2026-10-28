@@ -13,7 +13,6 @@
     body { margin: 0; padding: 24px; background: #f1f5f9; color: #0f172a; }
     .container { max-width: 1180px; margin: 0 auto; }
 
-    /* 로그인 카드 */
     .login-card {
       max-width: 440px; margin: 80px auto; background: #ffffff;
       padding: 36px 28px; border-radius: 20px; text-align: center;
@@ -26,7 +25,6 @@
     }
     .google-btn:hover { background: #1e40af; }
 
-    /* 상단 헤더 */
     .top-bar {
       display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
       background: #1e293b; color: #ffffff; padding: 20px 24px; border-radius: 16px; margin-bottom: 20px;
@@ -46,7 +44,6 @@
     .btn-gray { background: #475569; color: #fff; }
     .btn-outline { background: #ffffff; color: #334155; border: 1px solid #cbd5e1; }
 
-    /* 요약 통계 박스 */
     .stat-grid {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 12px; margin-bottom: 20px;
@@ -59,7 +56,6 @@
     .stat-label { font-size: 13px; color: #64748b; font-weight: 700; }
     .stat-num { font-size: 26px; font-weight: 800; margin-top: 6px; color: #0f172a; }
 
-    /* 패널 공통 */
     .panel {
       background: #ffffff; padding: 20px; border-radius: 16px;
       border: 1px solid #e2e8f0; margin-bottom: 20px;
@@ -70,7 +66,6 @@
       padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;
     }
 
-    /* 회원 목록 표 */
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: middle; }
@@ -90,7 +85,6 @@
 <body>
 
 <div class="container">
-  <!-- 1. 구글 마스터 로그인 화면 -->
   <div id="auth-view" class="login-card">
     <div style="font-size:40px; margin-bottom:8px;">🛡️</div>
     <h2 style="margin:0; color:#1e3a8a;">마스터 회원관리 컨트롤 타워</h2>
@@ -103,7 +97,6 @@
     <div id="auth-err" style="margin-top:14px; color:#dc2626; font-size:14px; font-weight:700;"></div>
   </div>
 
-  <!-- 2. 마스터 대시보드 본 화면 -->
   <div id="admin-view" style="display:none;">
     <div class="top-bar">
       <div>
@@ -117,7 +110,6 @@
       </div>
     </div>
 
-    <!-- 상단 통계 요약 (클릭 시 필터링) -->
     <div class="stat-grid">
       <div class="stat-card" onclick="setFilter('all')">
         <div class="stat-label">👥 전체 등록 계정</div>
@@ -141,9 +133,7 @@
       </div>
     </div>
 
-    <!-- 도구 패널 1: 테스터 빠른 생성 & 제미나이 API 키 설정 -->
     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:16px;">
-      <!-- 테스터 생성기 -->
       <div class="panel">
         <h3 class="panel-title">🧪 시연용 테스터 계정 빠른 생성 / 초기화</h3>
         <div class="form-row">
@@ -161,7 +151,6 @@
         </div>
       </div>
 
-      <!-- 제미나이 API 키 관리 -->
       <div class="panel">
         <h3 class="panel-title">⚙️ 클라우드 제미나이(Gemini) API 키 설정</h3>
         <div class="form-row">
@@ -173,7 +162,6 @@
       </div>
     </div>
 
-    <!-- 회원 목록 테이블 -->
     <div class="panel">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
         <h3 class="panel-title" style="margin:0;" id="list-title">📋 전체 회원 목록</h3>
@@ -204,6 +192,16 @@
 </div>
 
 <script>
+  function escapeHtml(s) {
+    if (s === undefined || s === null) return "";
+    return String(s)
+      .replace(/&/g, "\x26amp;")
+      .replace(/</g, "\x26lt;")
+      .replace(/>/g, "\x26gt;")
+      .replace(/\x22/g, "\x26quot;")
+      .replace(/\x27/g, "\x26#39;");
+  }
+
   const firebaseConfig = {
     apiKey: "AIzaSyAIf_-5uMXH4LNGSOdGVgM2PZZ_1-qK7pc",
     authDomain: "math-self-srudy.firebaseapp.com",
@@ -218,7 +216,6 @@
   const auth = firebase.auth();
   const db = firebase.firestore();
 
-  // 허용된 마스터 구글 이메일 목록
   const ALLOWED_MASTER_EMAILS = [
     "sjyoon7231@gmail.com"
   ];
@@ -237,7 +234,6 @@
     return "fb_" + Math.abs(h).toString(16);
   }
 
-  // 구글 로그인 처리
   function loginWithGoogle() {
     const provider = new firebase.auth.GoogleAuthProvider();
     auth.signInWithPopup(provider).catch(err => {
@@ -273,7 +269,6 @@
     loadMembers();
   });
 
-  // 날짜 계산 도우미
   function getTodayYMD() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -296,7 +291,6 @@
     return getTodayYMD() > m.expireDate;
   }
 
-  // 제미나이 API 키 로드 및 저장
   async function loadCloudGeminiKey() {
     try {
       const doc = await db.collection('settings').doc('gemini').get();
@@ -318,7 +312,6 @@
         apiKey: key,
         updatedAt: new Date().toLocaleString()
       });
-      localStorage.setItem('GEMINI_API_KEY', key);
       loadCloudGeminiKey();
       alert("✅ 클라우드에 제미나이 API 키가 저장되었습니다!");
     } catch (e) {
@@ -331,7 +324,6 @@
     inp.type = inp.type === 'password' ? 'text' : 'password';
   }
 
-  // 시연용 테스터 계정 생성
   async function createTesterAccount() {
     const tId = (document.getElementById('t-id').value || '').trim().toLowerCase();
     const tPin = (document.getElementById('t-pin').value || '').trim();
@@ -373,7 +365,6 @@
     }
   }
 
-  // 전체 회원 불러오기
   async function loadMembers() {
     const tbody = document.getElementById('member-tbody');
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px;">☁️ 클라우드 회원 목록을 불러오는 중...</td></tr>`;
@@ -384,7 +375,6 @@
         allMembers.push({ docId: doc.id, ...doc.data() });
       });
 
-      // 승인 대기(pending)를 맨 위로 정렬
       allMembers.sort((a, b) => {
         const score = m => (m.status === 'pending' ? 0 : (m.accountType === 'tester' ? 2 : 1));
         return score(a) - score(b);
@@ -393,7 +383,7 @@
       updateStats();
       renderMemberTable();
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#dc2626;">불러오기 실패: ${e.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#dc2626;">불러오기 실패: ${escapeHtml(e.message)}</td></tr>`;
     }
   }
 
@@ -402,7 +392,7 @@
     allMembers.forEach(m => {
       const st = m.status || 'active';
       const exp = isExpired(m);
-      if (m.accountType === 'tester') tester++;
+      if (m.accountType === 'tester' || /^tester\d+$/i.test(m.docId)) tester++;
       if (st === 'pending') pending++;
       else if (st === 'blocked' || exp) stopped++;
       else active++;
@@ -446,9 +436,10 @@
     const filtered = allMembers.filter(m => {
       const st = m.status || 'active';
       const exp = isExpired(m);
+      const isTester = (m.accountType === 'tester' || /^tester\d+$/i.test(m.docId));
       if (currentFilter === 'pending' && st !== 'pending') return false;
       if (currentFilter === 'active' && (st !== 'active' || exp)) return false;
-      if (currentFilter === 'tester' && m.accountType !== 'tester') return false;
+      if (currentFilter === 'tester' && !isTester) return false;
       if (currentFilter === 'stopped' && st !== 'blocked' && !exp) return false;
 
       if (q) {
@@ -463,8 +454,8 @@
       return;
     }
 
-    tbody.innerHTML = filtered.map(m => {
-      const isTester = m.accountType === 'tester';
+    tbody.innerHTML = filtered.map((m) => {
+      const isTester = (m.accountType === 'tester' || /^tester\d+$/i.test(m.docId));
       const st = m.status || 'active';
       const exp = isExpired(m);
 
@@ -473,32 +464,40 @@
       else if (st === 'blocked') statusBadge = `<span class="badge b-blocked">🔴 일시정지</span>`;
       else if (exp) statusBadge = `<span class="badge b-expired">📅 기간만료</span>`;
 
-      const expireText = m.isUnlimited ? '♾️ 무제한' : (m.expireDate || '미지정');
+      const safeEmail = escapeHtml(m.parentEmail || '(기존 이름계정)');
+      const safeName = escapeHtml(m.name || m.docId);
+      const safeGrade = escapeHtml(m.grade || '6');
+      const safeSem = escapeHtml(m.semester || '1');
+      const safeExpire = escapeHtml(m.expireDate || '');
+      const expireText = m.isUnlimited ? '♾️ 무제한' : (safeExpire || '미지정');
       const doneCnt = countCompletedLessons(m.records);
+      const safeDate = escapeHtml(m.updatedAt || m.createdAt || '-');
+
+      const memberIndex = allMembers.findIndex(item => item.docId === m.docId);
 
       return `
         <tr>
           <td>${isTester ? `<span class="badge b-tester">🧪 테스터</span>` : `👦 정식학생`}</td>
-          <td style="font-weight:700;">${m.parentEmail || '(기존 이름계정)'}</td>
-          <td><b>${m.name || m.docId}</b> (${m.grade || '6'}-${m.semester || '1'})</td>
+          <td style="font-weight:700;">${safeEmail}</td>
+          <td><b>${safeName}</b> (${safeGrade}-${safeSem})</td>
           <td>${statusBadge}</td>
           <td style="font-weight:700; color:${exp ? '#dc2626' : '#0f172a'};">${expireText}</td>
           <td>📚 ${doneCnt}개 차시 완료</td>
-          <td style="font-size:12px; color:#64748b;">${m.updatedAt || m.createdAt || '-'}</td>
+          <td style="font-size:12px; color:#64748b;">${safeDate}</td>
           <td>
             <div style="display:flex; gap:5px; flex-wrap:wrap;">
               ${st === 'pending'
-                ? `<button class="btn btn-green" onclick="approveMember('${m.docId}')">🟢 승인(+30일)</button>`
-                : `<button class="btn btn-blue" onclick="extendMember('${m.docId}', '${m.expireDate || ''}')">+30일 연장</button>`
+                ? `<button class="btn btn-green" onclick="approveMemberByIdx(${memberIndex})">🟢 승인(+30일)</button>`
+                : `<button class="btn btn-blue" onclick="extendMemberByIdx(${memberIndex})">+30일 연장</button>`
               }
-              <button class="btn btn-outline" onclick="setUnlimited('${m.docId}', ${!m.isUnlimited})">
+              <button class="btn btn-outline" onclick="setUnlimitedByIdx(${memberIndex})">
                 ${m.isUnlimited ? '기간제로' : '♾️무제한'}
               </button>
               ${st === 'blocked'
-                ? `<button class="btn btn-amber" onclick="setBlockStatus('${m.docId}', 'active')">정지해제</button>`
-                : `<button class="btn btn-amber" onclick="setBlockStatus('${m.docId}', 'blocked')">일시정지</button>`
+                ? `<button class="btn btn-amber" onclick="setBlockStatusByIdx(${memberIndex}, 'active')">정지해제</button>`
+                : `<button class="btn btn-amber" onclick="setBlockStatusByIdx(${memberIndex}, 'blocked')">일시정지</button>`
               }
-              <button class="btn btn-red" onclick="deleteMember('${m.docId}', '${m.name || m.docId}')">삭제</button>
+              <button class="btn btn-red" onclick="deleteMemberByIdx(${memberIndex})">삭제</button>
             </div>
           </td>
         </tr>
@@ -506,10 +505,11 @@
     }).join('');
   }
 
-  // 원클릭 제어 함수들
-  async function approveMember(docId) {
+  async function approveMemberByIdx(idx) {
+    const m = allMembers[idx];
+    if (!m) return;
     const newExpire = addDaysYMD('', 30);
-    await db.collection('students').doc(docId).set({
+    await db.collection('students').doc(m.docId).set({
       status: 'active',
       isUnlimited: false,
       expireDate: newExpire,
@@ -518,10 +518,12 @@
     loadMembers();
   }
 
-  async function extendMember(docId, currentExpire) {
-    const newExpire = addDaysYMD(currentExpire, 30);
-    await db.collection('students').doc(docId).set({
-      status: 'active',
+  // ★ 수정 완료: 기간 연장과 상태(status) 변경을 완전히 분리! (승인 대기나 일시 정지 상태를 건드리지 않음)
+  async function extendMemberByIdx(idx) {
+    const m = allMembers[idx];
+    if (!m) return;
+    const newExpire = addDaysYMD(m.expireDate || '', 30);
+    await db.collection('students').doc(m.docId).set({
       isUnlimited: false,
       expireDate: newExpire,
       updatedAt: new Date().toLocaleString()
@@ -529,9 +531,12 @@
     loadMembers();
   }
 
-  async function setUnlimited(docId, flag) {
-    await db.collection('students').doc(docId).set({
-      status: 'active',
+  // ★ 수정 완료: 무제한 전환 시에도 기존 status(pending/blocked/active)는 그대로 보존!
+  async function setUnlimitedByIdx(idx) {
+    const m = allMembers[idx];
+    if (!m) return;
+    const flag = !m.isUnlimited;
+    await db.collection('students').doc(m.docId).set({
       isUnlimited: flag,
       expireDate: flag ? '9999-12-31' : addDaysYMD('', 30),
       updatedAt: new Date().toLocaleString()
@@ -539,21 +544,25 @@
     loadMembers();
   }
 
-  async function setBlockStatus(docId, newStatus) {
-    await db.collection('students').doc(docId).set({
+  async function setBlockStatusByIdx(idx, newStatus) {
+    const m = allMembers[idx];
+    if (!m) return;
+    await db.collection('students').doc(m.docId).set({
       status: newStatus,
       updatedAt: new Date().toLocaleString()
     }, { merge: true });
     loadMembers();
   }
 
-  async function deleteMember(docId, name) {
-    if (!confirm(`⚠️ 정말 [${name}] 계정을 완전히 삭제할까요? (복구 불가)`)) return;
-    await db.collection('students').doc(docId).delete();
+  async function deleteMemberByIdx(idx) {
+    const m = allMembers[idx];
+    if (!m) return;
+    const dispName = m.name || m.docId;
+    if (!confirm(`⚠️ 정말 [${dispName}] 계정을 완전히 삭제할까요? (복구 불가)`)) return;
+    await db.collection('students').doc(m.docId).delete();
     loadMembers();
   }
 
-  // 마스터가 전체 학년 공부방을 직접 테스트하고 싶을 때
   async function enterStudyAsMaster() {
     const masterDocId = 'MASTER_PREVIEW';
     await db.collection('students').doc(masterDocId).set({

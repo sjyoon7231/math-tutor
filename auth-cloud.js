@@ -27,7 +27,6 @@ let state = {
   docId: null,
   parentEmail: null,
   studentName: null,
-  studentPin: null,
   studentGrade: '6',
   studentSem: '1',
   accountType: 'student',
@@ -117,12 +116,13 @@ function getStudyRecords() {
 async function saveStudyRecord(unitKey, lessonId, score, status, extraMeta = {}) {
   const records = getStudyRecords();
   if (!records[unitKey]) records[unitKey] = {};
-  records[unitKey][lessonId] = {
+  const lessonRecord = {
     score,
     status,
     date: new Date().toLocaleDateString(),
     ...extraMeta
   };
+  records[unitKey][lessonId] = lessonRecord;
   state.cloudRecords = records;
   localStorage.setItem(getCurrentRecordKey(), JSON.stringify(records));
 
@@ -130,7 +130,11 @@ async function saveStudyRecord(unitKey, lessonId, score, status, extraMeta = {})
   if (db && targetDocId) {
     try {
       await db.collection('students').doc(targetDocId).set({
-        records: records,
+        records: {
+          [unitKey]: {
+            [lessonId]: lessonRecord
+          }
+        },
         updatedAt: new Date().toLocaleString(),
         updatedTimestamp: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
@@ -166,7 +170,7 @@ function goHomeByRole() {
   }
 }
 
-// app.js가 처음 켜질 때 showAuthScreen()을 호출하면, 로그인 창을 띄우지 않고 정문 출입증을 확인해 바로 공부 화면으로 직행!
+// ★ 인증 통과 시 true, 실패 시 false를 반환하여 미인증 상태에서 API 키가 로드되지 않도록 방어!
 async function showAuthScreen() {
   hideApiBtnInStudy();
 
@@ -175,58 +179,61 @@ async function showAuthScreen() {
     session = JSON.parse(localStorage.getItem('MATH_CURRENT_SESSION') || 'null');
   } catch (e) {}
 
-  // 출입증이 없으면 정문(index.html)으로 즉시 이동
-  if (!session || (!session.docId && !session.name)) {
+  if (!session || (!session.docId && !session.name) || !db) {
     window.location.replace('index.html');
-    return;
+    return false;
   }
 
   state.docId = session.docId || session.name;
   state.parentEmail = session.parentEmail || '';
   state.studentName = session.name;
-  state.studentPin = session.pin || '';
   state.studentGrade = session.grade || '6';
   state.studentSem = session.semester || '1';
-  state.accountType = session.accountType || 'student';
-  state.isAllAccess = Boolean(session.isAllAccess);
+  state.accountType = 'student';
+  state.isAllAccess = false;
 
-  // 클라우드에서 최신 상태(정지/만료 여부) 및 학습 기록 실시간 동기화
-  if (db && state.docId) {
-    try {
-      const docSnap = await db.collection('students').doc(state.docId).get();
-      if (!docSnap.exists) {
-        alert("⚠️ 계정 정보를 찾을 수 없습니다. 다시 로그인해 주세요.");
-        localStorage.removeItem('MATH_CURRENT_SESSION');
-        window.location.replace('index.html');
-        return;
-      }
-      const cData = docSnap.data();
-
-      // 마스터가 정지시켰거나 기간이 만료되었는지 한 번 더 검증
-      const todayYMD = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
-      if (cData.status === 'pending' || cData.status === 'blocked') {
-        alert("⛔ 현재 이용이 제한되었거나 승인 대기 중인 계정입니다.");
-        localStorage.removeItem('MATH_CURRENT_SESSION');
-        window.location.replace('index.html');
-        return;
-      }
-      if (!cData.isUnlimited && cData.expireDate && todayYMD > cData.expireDate) {
-        alert(`📅 이용 기간(${cData.expireDate}까지)이 만료되었습니다.`);
-        localStorage.removeItem('MATH_CURRENT_SESSION');
-        window.location.replace('index.html');
-        return;
-      }
-
-      state.cloudRecords = cData.records || {};
-      localStorage.setItem(getCurrentRecordKey(), JSON.stringify(state.cloudRecords));
-      updateCloudBadge(true);
-    } catch (e) {
-      console.warn("클라우드 동기화 실패:", e);
+  try {
+    const docSnap = await db.collection('students').doc(state.docId).get();
+    if (!docSnap.exists) {
+      alert("⚠️ 계정 정보를 찾을 수 없습니다. 다시 로그인해 주세요.");
+      localStorage.removeItem('MATH_CURRENT_SESSION');
+      window.location.replace('index.html');
+      return false;
     }
+    const cData = docSnap.data();
+
+    const todayYMD = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+    if (cData.status === 'pending' || cData.status === 'blocked') {
+      alert("⛔ 현재 이용이 제한되었거나 승인 대기 중인 계정입니다.");
+      localStorage.removeItem('MATH_CURRENT_SESSION');
+      window.location.replace('index.html');
+      return false;
+    }
+    if (!cData.isUnlimited && cData.expireDate && todayYMD > cData.expireDate) {
+      alert(`📅 이용 기간(${cData.expireDate}까지)이 만료되었습니다.`);
+      localStorage.removeItem('MATH_CURRENT_SESSION');
+      window.location.replace('index.html');
+      return false;
+    }
+
+    const isTesterAccount = (cData.accountType === 'tester' || /^tester\d+$/i.test(state.docId) || state.docId === 'MASTER_PREVIEW');
+    state.studentName = cData.name || state.studentName;
+    state.accountType = isTesterAccount ? 'tester' : 'student';
+    state.isAllAccess = isTesterAccount;
+
+    state.cloudRecords = cData.records || {};
+    localStorage.setItem(getCurrentRecordKey(), JSON.stringify(state.cloudRecords));
+    updateCloudBadge(true);
+  } catch (e) {
+    console.warn("클라우드 계정 검증 실패:", e);
+    alert("⚠️ 클라우드 인증 서버와 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 로그인해 주세요.");
+    window.location.replace('index.html');
+    return false;
   }
 
   updateUserBadge();
   routeAfterLogin();
+  return true;
 }
 
 function routeAfterLogin() {
@@ -238,10 +245,11 @@ function routeAfterLogin() {
   if (typeof MATH_DB !== 'undefined' && MATH_DB.units && MATH_DB.units[targetKey]) {
     showUnitSelect(state.studentGrade, state.studentSem);
   } else {
-    state.studentGrade = '6';
+    alert(`💡 ${state.studentGrade}학년 과정은 현재 오픈 준비 중이어서, 지금 바로 학습 가능한 5학년 1학기 과정으로 안내합니다!`);
+    state.studentGrade = '5';
     state.studentSem = '1';
     updateUserBadge();
-    showUnitSelect('6', '1');
+    showUnitSelect('5', '1');
   }
 }
 
@@ -267,7 +275,10 @@ async function clearUnitRecords() {
     const targetDocId = state.docId || state.studentName;
     if (db && targetDocId) {
       try {
-        await db.collection('students').doc(targetDocId).set({ records }, { merge: true });
+        await db.collection('students').doc(targetDocId).update({
+          [`records.${state.unitKey}`]: firebase.firestore.FieldValue.delete(),
+          updatedAt: new Date().toLocaleString()
+        });
       } catch (e) {}
     }
     showLessonSelect(state.grade, state.semester, state.unit);
@@ -275,7 +286,7 @@ async function clearUnitRecords() {
 }
 
 // ==========================================
-// 🔑 3. 클라우드 API 키 자동 로드 (학생 공부 화면에서는 버튼 완전 숨김)
+// 🔑 3. 클라우드 API 키 자동 로드 (브라우저 localStorage에 키를 남기지 않고 메모리 변수에만 보관!)
 // ==========================================
 let cloudApiKey = '';
 
@@ -284,14 +295,14 @@ function getSavedApiKey() {
     cloudApiKey ||
     state.geminiApiKey ||
     state.apiKey ||
-    localStorage.getItem('GEMINI_API_KEY') ||
-    localStorage.getItem('MATH_GEMINI_API_KEY') ||
     ''
   ).trim();
 }
 
 async function loadCloudApiKey() {
   hideApiBtnInStudy();
+  localStorage.removeItem('GEMINI_API_KEY');
+  localStorage.removeItem('MATH_GEMINI_API_KEY');
   if (!db) return;
   try {
     const doc = await db.collection('settings').doc('gemini').get();
@@ -299,7 +310,6 @@ async function loadCloudApiKey() {
       cloudApiKey = doc.data().apiKey.trim();
       state.geminiApiKey = cloudApiKey;
       state.apiKey = cloudApiKey;
-      localStorage.setItem('GEMINI_API_KEY', cloudApiKey);
     }
   } catch (e) {
     console.warn("클라우드 API 키 불러오기 실패:", e);
