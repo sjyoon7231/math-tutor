@@ -82,11 +82,12 @@ function renderCurrentSmallStep() {
   const stepsHTML = state.smallSteps.map((st, idx) => {
     if (idx > state.smallStepIdx) return '';
     const isDone = idx < state.smallStepIdx;
+    const stepAns = st.ans !== undefined ? st.ans : st.a;
     return `
       <div class="step-item">
         <div class="step-q">${st.q}</div>
         <div class="step-input-row">
-          <input type="text" id="ss-input-${idx}" class="step-mini-input" value="${isDone ? st.ans : ''}" ${isDone ? 'disabled' : ''} placeholder="답 입력" onkeydown="if(event.key==='Enter') checkSmallStep(${idx})">
+          <input type="text" id="ss-input-${idx}" class="step-mini-input" value="${isDone ? stepAns : ''}" ${isDone ? 'disabled' : ''} placeholder="답 입력" onkeydown="if(event.key==='Enter') checkSmallStep(${idx})">
           ${isDone ? `<span style="color:#166534; font-weight:bold;">✅ 통과!</span>` : `<button type="button" class="step-mini-btn" onclick="checkSmallStep(${idx})">확인</button>`}
         </div>
         <div id="ss-msg-${idx}" class="step-mini-msg"></div>
@@ -106,7 +107,9 @@ function checkSmallStep(idx) {
   if (!st || !inp || !msg) return;
 
   const val = inp.value.trim();
-  if (normalizeMathText(val) === normalizeMathText(String(st.ans))) {
+  const targetStepAns = String(st.ans !== undefined ? st.ans : st.a);
+
+  if (normalizeMathText(val) === normalizeMathText(targetStepAns)) {
     state.smallStepIdx++;
     if (state.smallStepIdx < state.smallSteps.length) {
       renderCurrentSmallStep();
@@ -122,7 +125,10 @@ function checkSmallStep(idx) {
   } else {
     msg.style.color = '#dc2626';
     msg.innerText = `아쉬워요! 아래에 나타난 소크라테스 AI 선생님과 대화하며 힌트를 얻어보세요!`;
-    openAiTutorForStep(`학생이 스몰 스텝 계단 문제("${st.q}")에서 "${val || '빈칸'}"이라고 오답을 적어 막혔습니다. 정답(${st.ans})을 직접 말하지 말고 친절한 질문으로 유도해 주세요!`);
+    openAiTutorForStep(
+      `학생이 스몰 스텝 계단 문제("${st.q}")에서 "${val || '빈칸'}"(오답)이라고 적어 틀렸습니다. 이 계단 문제의 실제 정답은 "${targetStepAns}"입니다.`,
+      val
+    );
   }
 }
 
@@ -190,7 +196,6 @@ function normalizeMathText(str) {
     .replace(/빼기/g, '-');
 }
 
-// 힌트 말투("~생각해 보세요", "~적어 보세요")를 정답 확인 후의 깔끔한 해설 말투로 변환!
 function cleanHintIntoExplanation(rawText, targetAns) {
   if (!rawText) return '';
   return String(rawText)
@@ -212,7 +217,6 @@ function getProblemContextForAI(item) {
     ? `${item.ans}번 (${item.choices[parseInt(item.ans, 10) - 1] || ''})`
     : ((item.num !== undefined && item.den !== undefined) ? `${item.num}/${item.den}` : String(item.ans || ''));
 
-  // 1순위: checkTip(명쾌한 해설), 2순위: 다듬어진 h1(핵심 원리)
   let whyReason = '';
   if (item.checkTip) {
     whyReason = item.checkTip;
@@ -278,15 +282,11 @@ function isStudentAnswerRight(userText, item) {
   return false;
 }
 
-async function openAiTutorForStep(situationDesc) {
+// ★ 첫 호출 시에도 거짓 칭찬("잘했어요!")을 절대 하지 못하도록 강력 교정!
+async function openAiTutorForStep(situationDesc, wrongVal = '') {
   const box = document.getElementById('ai-tutor-box');
   const log = document.getElementById('ai-chat-log');
   if (!box || !log) return;
-
-  if (box.style.display === 'block' && state.aiChatHistory && state.aiChatHistory.length > 0) {
-    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    return;
-  }
 
   box.style.display = 'block';
   state.aiChatHistory = [];
@@ -296,15 +296,16 @@ async function openAiTutorForStep(situationDesc) {
   const ctx = getProblemContextForAI(state.currentItem);
 
   const firstPrompt = [
-    `현재 문제: ${ctx.qText}`,
+    `현재 원래 문제: ${ctx.qText}`,
     ctx.choiceInfo ? `${ctx.choiceInfo}` : '',
-    `이 문제의 실제 정답(절대 학생에게 먼저 말하지 말 것!): ${ctx.targetAns}`,
+    `원래 문제의 최종 정답(비밀): ${ctx.targetAns}`,
     `참고 원리: ${state.currentItem?.h1 || ''} / ${state.currentItem?.h2 || ''}`,
     `현재 상황: ${situationDesc}`,
-    `규칙:`,
-    `1. 초등학생 눈높이에 맞춰 다정하게 한 문장으로 격려하세요.`,
-    `2. 정답("${ctx.targetAns}")을 절대 직접 알려주지 마세요.`,
-    `3. 학생이 간단한 숫자나 단어로 쉽게 대답할 수 있는 첫 번째 징검다리 질문을 딱 한 가지만 던져주세요.`
+    `반드시 지킬 규칙:`,
+    `1. [거짓 칭찬 절대 금지!] 학생은 방금 문제를 틀려서 도움을 받으러 왔습니다. 따라서 "잘했어요!", "맞았어요!", "정확해요!", "훌륭해요!" 같은 칭찬 표현을 절대 쓰지 마세요!`,
+    `2. ${wrongVal ? `"아하, ${wrongVal}(이)라고 생각했군요! 아쉽지만 다시 한번 차근차근 살펴볼까요?"처럼 학생이 적은 오답(${wrongVal})을 부드럽게 짚어주며 시작하세요.` : `"조금 헷갈렸군요! 선생님과 함께 차근차근 풀어 볼까요?"처럼 다정하게 시작하세요.`}`,
+    `3. 정답("${ctx.targetAns}")을 절대 직접 알려주지 마세요.`,
+    `4. 학생이 간단한 숫자나 단어로 쉽게 대답할 수 있는 가장 쉬운 첫 번째 징검다리 계산 질문을 딱 한 가지만 던져주세요.`
   ].filter(Boolean).join('\n');
 
   const reply = await callGeminiSocraticAPI(firstPrompt, []);
@@ -337,7 +338,6 @@ async function sendAiUserMessage() {
   if (!userText) return;
   inp.value = '';
 
-  // 직전 AI 선생님의 질문을 가져와서 맥락 파악에 활용
   const prevModelMessages = (state.aiChatHistory || []).filter(m => m.role === 'model');
   const lastAiQuestion = prevModelMessages.length > 0 ? prevModelMessages[prevModelMessages.length - 1].text : '';
 
@@ -347,14 +347,14 @@ async function sendAiUserMessage() {
   const item = state.currentItem || {};
   const ctx = getProblemContextForAI(item);
 
-  // 학생이 최종 정답을 정확히 말했을 때: 즉시 칭찬 + 깔끔한 원리 정리 + 위쪽 정답 칸 입력 안내!
+  // 학생이 원래 문제의 최종 정답을 정확히 말했을 때
   if (isStudentAnswerRight(userText, item)) {
     const actionGuide = ctx.isChoice
       ? `👉 <b>이제 위쪽 문제에서 [${ctx.targetAns}] 보기 버튼을 직접 눌러보세요!</b>`
       : `👉 <b>이제 위쪽 문제의 정답 입력 칸에 [${ctx.targetAns}]을(를) 입력하고 [정답 확인하기] 버튼을 눌러보세요!</b>`;
 
     const instantPraise = [
-      `🎉 <b>딩동댕! 정확해요! 정답은 [${ctx.targetAns}]입니다!</b> 👏`,
+      `🎉 <b>딩동댕! 정확해요! 구하려는 정답은 [${ctx.targetAns}]입니다!</b> 👏`,
       `<div style="margin-top:8px; padding:10px 12px; background:#ffffff; border-left:4px solid #0d9488; border-radius:6px; color:#134e4a; font-size:14px;">💡 <b>핵심 원리 정리:</b><br>${ctx.whyReason}</div>`,
       `<div style="margin-top:8px; padding:8px 12px; background:#fef08a; color:#854d0e; border-radius:8px; font-weight:bold;">${actionGuide}</div>`
     ].join('');
@@ -373,13 +373,12 @@ async function sendAiUserMessage() {
     ctx.choiceInfo ? `${ctx.choiceInfo}` : '',
     `원래 문제의 최종 정답(비밀): "${ctx.targetAns}" (핵심 원리: ${ctx.whyReason})`,
     `방금 직전에 당신(AI 선생님)이 학생에게 물었던 질문: "${lastAiQuestion}"`,
-    `방금 학생이 입력한 대답: "${userText}" (주의: 이 대답은 아직 최종 정답 "${ctx.targetAns}"이 아닙니다!)`,
+    `방금 학생이 입력한 대답: "${userText}"`,
     `반드시 지킬 핵심 규칙:`,
-    `1. [거짓 칭찬 및 스포일러 절대 금지] 학생이 방금 입력한 대답("${userText}")이 당신의 직전 질문에 대해 틀린 답이라면, 절대 맞았다고 칭찬하거나 학생이 정답을 알고 있다고 착각하지 마세요! 또한 최종 정답("${ctx.targetAns}")을 당신이 먼저 말하면 절대 안 됩니다.`,
-    `2. [학생이 틀린 답을 말했을 때] "아하, ${userText}(이)라고 생각했군요! 하지만 다시 한번 살펴볼까요?"처럼 학생이 적은 숫자를 정확히 언급하며 왜 아닌지 짚어주고, 더 쉬운 힌트 질문을 던지세요.`,
-    `3. [학생이 중간 징검다리 질문만 맞혔을 때] 그 징검다리 대답만 칭찬하고, 최종 정답("${ctx.targetAns}")을 구하기 위한 다음 단계 계산 질문을 이어서 던지세요.`,
-    `4. 만약 학생이 "모르겠어요"라고 하면 가장 쉬운 덧셈·곱셈·나눗셈 단위로 쪼개어 질문하세요.`,
-    `5. 만약 학생의 대답이 최종 정답("${ctx.targetAns}")과 완전히 같은 뜻이라면 칭찬 후 맨 끝에 "[완료]"라고 적으세요.`
+    `1. [거짓 칭찬 및 스포일러 절대 금지] 먼저 당신이 직전에 물었던 질문("${lastAiQuestion}")에 대해 학생의 대답("${userText}")이 맞는지 계산해 보세요. 만약 틀린 대답이라면 절대 "잘했어요!"라고 칭찬하지 마세요! 또한 최종 정답("${ctx.targetAns}")을 당신이 먼저 말하면 절대 안 됩니다.`,
+    `2. [학생이 직전 질문에 틀린 답을 말했을 때] "아하, ${userText}(이)라고 생각했군요! 하지만 다시 계산해 볼까요?"처럼 왜 틀렸는지 짚어주고 더 쉬운 힌트 질문을 던지세요.`,
+    `3. [학생이 중간 징검다리 질문을 맞혔을 때] "맞아요! ${userText}입니다!"라고 그 징검다리 계산만 칭찬한 뒤, 바로 다음 단계 계산 질문을 이어서 던지세요.`,
+    `4. 만약 학생의 대답이 최종 정답("${ctx.targetAns}")과 완전히 같다면 칭찬 후 맨 끝에 "[완료]"라고 적으세요.`
   ].filter(Boolean).join('\n');
 
   let reply = await callGeminiSocraticAPI(systemGuide, state.aiChatHistory);
@@ -427,7 +426,7 @@ async function callGeminiSocraticAPI(promptText, historyArr) {
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
           generationConfig: {
-            temperature: 0.3,
+            temperature: 0.2,
             maxOutputTokens: 1024
           }
         })
