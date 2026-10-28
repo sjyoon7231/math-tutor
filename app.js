@@ -1,19 +1,34 @@
 // =========================================================================
-// 🚀 app.js - 초등 수학 AI 자기주도 완전학습 메인 엔진 (5·6학년 모든 구조 100% 호환 완본)
+// 🚀 app.js - 초등 수학 AI 자기주도 완전학습 메인 엔진 (전체 기능 복원 + 클로드·챗GPT 검수 완벽 반영 완본)
 // =========================================================================
 
 // -------------------------------------------------------------------------
-// 1. 5학년 & 6학년 모든 단원 데이터 구조 자동 해독 및 표준화 어댑터
+// 1. 5학년 & 6학년 모든 단원 데이터 구조 자동 해독 및 표준화 어댑터 (원본 보존형)
 // -------------------------------------------------------------------------
-function normalizeQuestionItem(item) {
-  if (!item || typeof item !== 'object') return item;
+function normalizeQuestionItem(rawItem) {
+  if (!rawItem || typeof rawItem !== 'object') return rawItem;
+  if (rawItem.__normalized) return rawItem;
+
+  // ★ 원본 데이터를 절대 직접 수정하지 않도록 얕은 복사본 생성!
+  const item = Object.assign({}, rawItem, { __normalized: true });
+
+  // 스몰스텝(steps) 배열 및 내부 객체도 복사본으로 생성하여 a <-> ans 통일
+  if (Array.isArray(rawItem.steps)) {
+    item.steps = rawItem.steps.map(st => {
+      if (!st || typeof st !== 'object') return st;
+      const stCopy = Object.assign({}, st);
+      if (stCopy.ans === undefined && stCopy.a !== undefined) stCopy.ans = String(stCopy.a);
+      if (stCopy.a === undefined && stCopy.ans !== undefined) stCopy.a = String(stCopy.ans);
+      return stCopy;
+    });
+  }
 
   // 객관식 보기 통일: options(0부터 시작) -> choices(1부터 시작하는 문자열)
   const rawOpts = item.choices || item.options;
   if (Array.isArray(rawOpts) && rawOpts.length > 0) {
     const isZeroIndexed = !item.choices && Array.isArray(item.options);
     item.choices = rawOpts.map((opt, idx) => {
-      const clean = String(opt).replace(/^\d+번\s*[:.]?\s*/, '');
+      const clean = String(opt ?? '').replace(/^\d+번\s*[:.]?\s*/, '');
       return `${idx + 1}번: ${clean}`;
     });
     if (isZeroIndexed) {
@@ -25,7 +40,7 @@ function normalizeQuestionItem(item) {
     }
   }
 
-  // 주관식 정답 키 통일: a <-> ans <-> answer
+  // 주관식 정답 키 통일: a <-> ans <-> answer (숫자 0 보존)
   if (item.ans === undefined) {
     if (item.a !== undefined) item.ans = String(item.a);
     else if (item.answer !== undefined) item.ans = String(item.answer);
@@ -35,24 +50,17 @@ function normalizeQuestionItem(item) {
   }
 
   // 분수 정답(num/den)이 있는데 ans 문자열이 없는 경우 자동 생성
-  if (item.num !== undefined && item.den !== undefined && !item.ans) {
+  if (item.num !== undefined && item.den !== undefined && (item.ans === undefined || item.ans === '')) {
     item.ans = item.whole ? `${item.whole}과 ${item.num}/${item.den}` : `${item.num}/${item.den}`;
     item.a = item.ans;
-  }
-
-  // 스몰스텝(steps) 내부 정답 키 통일
-  if (Array.isArray(item.steps)) {
-    item.steps.forEach(st => {
-      if (st.ans === undefined && st.a !== undefined) st.ans = String(st.a);
-      if (st.a === undefined && st.ans !== undefined) st.a = String(st.ans);
-    });
   }
 
   return item;
 }
 
-function normalizeLessonObj(les, fallbackCode) {
-  if (!les || typeof les !== 'object') return les;
+function normalizeLessonObj(rawLes, fallbackCode) {
+  if (!rawLes || typeof rawLes !== 'object') return rawLes;
+  const les = Object.assign({}, rawLes);
 
   if (!les.id && fallbackCode) les.id = fallbackCode;
   if (!les.title && les.name) les.title = les.name;
@@ -68,10 +76,9 @@ function normalizeLessonObj(les, fallbackCode) {
   const listKeys = ['warmup', 'step1Quiz', 'step2_1', 'step2_2', 'step3A', 'step4B'];
   listKeys.forEach(k => {
     if (Array.isArray(les[k])) {
-      les[k].forEach(normalizeQuestionItem);
+      les[k] = les[k].map(normalizeQuestionItem);
     } else if (les[k] && typeof les[k] === 'object') {
-      normalizeQuestionItem(les[k]);
-      les[k] = [les[k]];
+      les[k] = [normalizeQuestionItem(les[k])];
     }
   });
 
@@ -87,7 +94,6 @@ function normalizeLessonObj(les, fallbackCode) {
   return les;
 }
 
-// 차시 객체인지 판별하는 도우미
 function isLikelyLessonObject(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
   return Boolean(
@@ -106,7 +112,7 @@ function normalizeAllMathData() {
 
     const unitNum = unitKey.split('-')[2] || '1';
 
-    // 1) 만약 { title: "...", lessons: { ... } } 또는 { data: [ ... ] } 처럼 한 겹 더 감싸져 있다면 껍질 벗기기!
+    // 1) 만약 { title: "...", lessons: { ... } } 처럼 한 겹 더 감싸져 있다면 껍질 벗기기
     if (!Array.isArray(rawUnit) && typeof rawUnit === 'object') {
       if (rawUnit.lessons && typeof rawUnit.lessons === 'object') {
         rawUnit = rawUnit.lessons;
@@ -135,7 +141,6 @@ function normalizeAllMathData() {
       const metaKeys = ['lessonOrder', 'title', 'name', 'desc', 'description', 'unit', 'grade', 'semester', 'unitId', 'unitNum', 'subtitle', 'lessonTitles'];
       const validCodes = [];
 
-      // 기존 lessonOrder가 있더라도 실제 차시 객체가 들어 있는지 검증
       if (Array.isArray(rawUnit.lessonOrder)) {
         rawUnit.lessonOrder.forEach(c => {
           if (rawUnit[c] && isLikelyLessonObject(rawUnit[c])) {
@@ -144,7 +149,6 @@ function normalizeAllMathData() {
         });
       }
 
-      // 만약 validCodes가 비어 있다면 객체의 모든 키를 뒤져서 진짜 차시 데이터만 추출!
       if (validCodes.length === 0) {
         Object.keys(rawUnit).forEach(k => {
           if (metaKeys.includes(k)) return;
@@ -152,7 +156,6 @@ function normalizeAllMathData() {
           if (isLikelyLessonObject(val)) {
             validCodes.push(String(k));
           } else if (val && typeof val === 'object' && !Array.isArray(val)) {
-            // 혹시 한 단계 더 깊이 들어있는 경우
             Object.keys(val).forEach(subK => {
               if (isLikelyLessonObject(val[subK])) {
                 rawUnit[subK] = val[subK];
@@ -248,6 +251,7 @@ async function saveApiKey() {
 // 🏫 3. 학년 ➔ 학기 ➔ 단원 ➔ 차시 선택 화면
 // -------------------------------------------------------------------------
 function showGradeSelect() {
+  if (typeof resetAiTutorState === 'function') resetAiTutorState();
   normalizeAllMathData();
   setHeaderUI('🎒 학년·학기 선택', false, false);
   setBreadcrumb('홈 > 학년·학기 선택');
@@ -290,6 +294,7 @@ function showGradeSelect() {
 }
 
 function showUnitSelect(grade, semester) {
+  if (typeof resetAiTutorState === 'function') resetAiTutorState();
   normalizeAllMathData();
   state.grade = String(grade);
   state.semester = String(semester);
@@ -355,6 +360,7 @@ function showUnitSelect(grade, semester) {
 }
 
 function showLessonSelect(grade, semester, unit) {
+  if (typeof resetAiTutorState === 'function') resetAiTutorState();
   normalizeAllMathData();
   state.grade = String(grade);
   state.semester = String(semester);
@@ -394,7 +400,8 @@ function showLessonSelect(grade, semester, unit) {
       badgeHTML = `<span class="review-badge">🔄 복습 권장 (${rec.score || 0}점)</span>`;
     }
 
-    const cleanTitle = String(les.title || `${code}차시`).replace(/^\d+-\d+\.?\s*/, '');
+    // ★ "[4-1차시] 차시: 비의 성질을 알아볼까요"처럼 '차시:'가 두 번 나오는 현상 깔끔히 제거!
+    const cleanTitle = String(les.title || `${code}차시`).replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
 
     return `
       <button type="button" class="menu-item" onclick="startLesson('${code}')">
@@ -441,6 +448,7 @@ function showLessonSelect(grade, semester, unit) {
 // 🎬 4. 차시 학습 진행: 워밍업 ➔ 1단계(영상 + 퀴즈) ➔ 2단계(함께/혼자)
 // -------------------------------------------------------------------------
 function startLesson(lessonId) {
+  if (typeof resetAiTutorState === 'function') resetAiTutorState();
   normalizeAllMathData();
   state.lessonId = lessonId;
   state.lessonData = MATH_DB.lessons[state.unitKey][lessonId];
@@ -456,8 +464,9 @@ function startLesson(lessonId) {
   state.currentStepKey = null;
   state.currentStepStartTime = null;
 
+  const cleanTitle = String(state.lessonData.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
   setHeaderUI(`${lessonId}차시 학습 중`, true, true);
-  setBreadcrumb(`${state.grade}-${state.semester} > ${state.unit}단원 > [${lessonId}] ${state.lessonData.title}`);
+  setBreadcrumb(`${state.grade}-${state.semester} > ${state.unit}단원 > [${lessonId}] ${cleanTitle}`);
   updateScoreBoard('워밍업');
 
   const warmupList = Array.isArray(state.lessonData.warmup)
@@ -479,11 +488,13 @@ function startLesson(lessonId) {
 }
 
 function showStep1Concept() {
+  if (typeof resetAiTutorState === 'function') resetAiTutorState();
   startStepTimer('step1');
   setHeaderUI(`1단계: 개념 익히기`, true, true);
   updateScoreBoard('1단계 개념');
 
   const les = state.lessonData;
+  const cleanTitle = String(les.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
   const embedUrl = getCleanYoutubeEmbedUrl(les.videoUrl);
   const sc = les.summaryCard || {};
 
@@ -514,7 +525,7 @@ function showStep1Concept() {
 
   const content = document.getElementById('app-content');
   content.innerHTML = `
-    <h2>🎬 1단계: [${state.lessonId}] ${les.title}</h2>
+    <h2>🎬 1단계: [${state.lessonId}] ${cleanTitle}</h2>
     ${videoHTML}
     ${cardHTML}
     <button type="button" class="btn" onclick="startStep1Quiz()">✅ 개념을 이해했어요! 확인 퀴즈 풀기 👉</button>
@@ -639,7 +650,7 @@ function readUserAnswerFromDOM(item, prefix = 'ans') {
 }
 
 function checkAnswerMatch(userVal, item) {
-  if (!userVal) return false;
+  if (userVal === undefined || userVal === null || String(userVal).trim() === '') return false;
   const cleanUser = normalizeMathText(userVal);
 
   if (isFractionProblem(item)) {
@@ -666,19 +677,24 @@ function checkAnswerMatch(userVal, item) {
   return false;
 }
 
+// ★ 클로드 3번 지적 반영: 새 문제를 그릴 때마다 resetAiTutorState()를 호출하여 이전 AI 응답 오염을 완벽 차단!
 function renderInteractivePractice(stageTitle, goalDesc, item, onNextCallback) {
+  if (typeof resetAiTutorState === 'function') {
+    resetAiTutorState();
+  }
   state.currentItem = normalizeQuestionItem(item);
   state.attempt = 1;
   state.currentCheckFn = onNextCallback;
   state.aiChatHistory = [];
 
+  const curItem = state.currentItem;
   const content = document.getElementById('app-content');
   content.innerHTML = `
     <h2>${stageTitle}</h2>
     <div class="goal-box">${goalDesc}</div>
-    <div class="question-box">${item.q}</div>
+    <div class="question-box">${curItem.q}</div>
     <div id="interactive-input-area">
-      ${buildAnswerInputHTML(item, 'ans')}
+      ${buildAnswerInputHTML(curItem, 'ans')}
     </div>
     <div id="interactive-feedback" class="feedback"></div>
     <button type="button" id="interactive-next-btn" class="btn" style="display:none; background:#16a34a;" onclick="state.currentCheckFn()">다음 단계로 이동하기 👉</button>
@@ -711,9 +727,10 @@ function handleInteractiveResult(isRight, userVal) {
   const nextBtn = document.getElementById('interactive-next-btn');
 
   if (isRight) {
-    const cleanExplanation = (typeof cleanHintIntoExplanation === 'function')
-      ? cleanHintIntoExplanation(item.h2 || item.h1 || '', item.ans)
-      : (item.h2 || item.h1 || '');
+    if (typeof cancelPendingAiRequests === 'function') cancelPendingAiRequests();
+    const cleanExplanation = item.h2
+      ? String(item.h2)
+      : ((typeof cleanHintIntoExplanation === 'function') ? cleanHintIntoExplanation(item.h1 || '', item.ans) : (item.h1 || ''));
     fb.className = 'feedback correct';
     fb.innerHTML = `🎉 <b>정답입니다! 참 잘했어요!</b>\n${cleanExplanation ? `💡 <b>풀이 정리:</b> ${cleanExplanation}` : ''}`;
     if (nextBtn) {
@@ -735,7 +752,7 @@ function handleInteractiveResult(isRight, userVal) {
     fb.innerHTML = `🪜 <b>2번 연속 막혔네요! 아래 도우미와 함께 계단을 밟듯 차근차근 해결해 볼까요?</b>\n${specificDiag ? `📌 <b>내가 틀린 까닭:</b> ${specificDiag}\n` : ''}👉 <b>핵심 힌트:</b> ${item.h1 || ''}`;
 
     if (Array.isArray(item.choices) && item.choices.length > 0) {
-      openAiTutorForStep(`학생이 객관식 문제에서 "${userVal}"을 골라 2번 연속 틀렸습니다. 정답을 직접 말하지 말고 쉬운 질문으로 유도해 주세요.`);
+      openAiTutorForStep(`학생이 객관식 문제에서 "${userVal}"을 골라 2번 연속 틀렸습니다. 정답을 직접 말하지 말고 쉬운 질문으로 유도해 주세요.`, userVal);
     } else {
       activateSmallStepIfNeeded();
     }
@@ -746,6 +763,7 @@ function handleInteractiveResult(isRight, userVal) {
 // 📝 6. 3단계(블라인드 실력 확인 3문항) & 4단계(1:1 쌍둥이 오답 클리닉)
 // -------------------------------------------------------------------------
 function startStep3Blind() {
+  if (typeof resetAiTutorState === 'function') resetAiTutorState();
   startStepTimer('step3');
   setHeaderUI(`3단계: 실력 확인 (3문항)`, true, true);
   updateScoreBoard('3단계 실력 확인');
@@ -912,6 +930,7 @@ function runNextTwinProblem() {
 // 🗣️ 7. 5단계: (5-1) 핵심 원리 빈칸 낱말 퍼즐 ➔ (5-2) 핵심 문장 3회 소리 내어 읽기
 // -------------------------------------------------------------------------
 function startStep5WrapUp() {
+  if (typeof resetAiTutorState === 'function') resetAiTutorState();
   startStepTimer('step5');
   setHeaderUI(`5단계: 핵심 원리 정리`, true, true);
   updateScoreBoard('5단계 정리');
@@ -1064,13 +1083,14 @@ async function showFinalLessonReport() {
 
   const st = state.stepTimes || {};
   const totalSec = Object.values(st).reduce((a, b) => a + b, 0);
+  const cleanTitle = String(state.lessonData.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
 
   const content = document.getElementById('app-content');
   content.innerHTML = `
-    <h2>🎉 [${state.lessonId}차시] ${state.lessonData.title} 완전학습 리포트</h2>
+    <h2>🎉 [${state.lessonId}차시] ${cleanTitle} 완전학습 리포트</h2>
     <div class="report-card">
       <div>👦 <b>학생 이름:</b> ${state.studentName} (${state.grade}학년 ${state.semester}학기)</div>
-      <div>📘 <b>완료 차시:</b> ${state.unit}단원 [${state.lessonId}] ${state.lessonData.title}</div>
+      <div>📘 <b>완료 차시:</b> ${state.unit}단원 [${state.lessonId}] ${cleanTitle}</div>
       <div>🎯 <b>3단계 실력 확인:</b> ${state.records.join(' ')} (초기 ${state.score}점 ➔ 쌍둥이 클리닉 후 <b>${finalScore}점 완전학습!</b>)</div>
       <div>⏱️ <b>총 학습 소요 시간:</b> ${formatSec(totalSec)}</div>
       <div style="margin-top:12px;">
@@ -1105,10 +1125,11 @@ async function showFinalLessonReport() {
 }
 
 function copyLessonReportToClipboard(finalScore, timeStr) {
+  const cleanTitle = String(state.lessonData.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
   const text = [
     `📊 [초등 수학 AI 완전학습 완료 보고서]`,
     `• 학생: ${state.studentName} (${state.grade}학년 ${state.semester}학기)`,
-    `• 단원/차시: ${state.unit}단원 [${state.lessonId}] ${state.lessonData.title}`,
+    `• 단원/차시: ${state.unit}단원 [${state.lessonId}] ${cleanTitle}`,
     `• 3단계 실력 확인: ${state.records.join(' ')} (초기 ${state.score}점)`,
     `• 최종 성취도: ${finalScore}점 (쌍둥이 보충 및 3회 낭독 완료)`,
     `• 총 학습 시간: ${timeStr}`,
@@ -1124,6 +1145,7 @@ function copyLessonReportToClipboard(finalScore, timeStr) {
 // 🏆 8. 10문항 실전 단원평가 모의고사 & 오답 즉시 쌍둥이 재도전 클리닉
 // -------------------------------------------------------------------------
 function startUnitExam() {
+  if (typeof resetAiTutorState === 'function') resetAiTutorState();
   normalizeAllMathData();
   const unitLessons = MATH_DB.lessons[state.unitKey];
   if (!unitLessons) return;
@@ -1134,12 +1156,13 @@ function startUnitExam() {
   order.forEach(code => {
     const les = unitLessons[code];
     if (!les) return;
+    const cleanTitle = String(les.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
     const aList = les.step3A || [];
     const bList = les.step4B || [];
     aList.forEach((qItem, idx) => {
       pool.push({
         lessonCode: code,
-        lessonTitle: les.title,
+        lessonTitle: cleanTitle,
         qItem: normalizeQuestionItem(qItem),
         twinItem: normalizeQuestionItem(bList[idx] || qItem)
       });

@@ -1,5 +1,5 @@
 // =========================================================================
-// tutor-helper.js - 따옴표 깨짐 원천 차단 완본 (문법 오류 0%)
+// tutor-helper.js - 클로드 & 챗GPT 2차 심층 검수 100% 완벽 반영 완본
 // =========================================================================
 
 function escapeHtml(s) {
@@ -23,42 +23,53 @@ function normalizeMathText(str) {
     .replace(/빼기/g, "-");
 }
 
+// ★ 2번 지적 완벽 해결: 원본(state.currentItem)을 절대 건드리지 않고 복사본(Object.assign)만 만들어 반환!
 function ensureNormalizedItem(item) {
   if (!item || typeof item !== "object") return item;
+  if (item.__normalized) return item;
 
-  if (Array.isArray(item.options) && !item.choices) {
-    item.choices = item.options.map(function(opt, idx) {
+  var copy = Object.assign({}, item, { __normalized: true });
+
+  if (Array.isArray(item.steps)) {
+    copy.steps = item.steps.map(function(st) {
+      if (!st || typeof st !== "object") return st;
+      var stCopy = Object.assign({}, st);
+      if (stCopy.ans === undefined && stCopy.a !== undefined) stCopy.ans = String(stCopy.a);
+      if (stCopy.a === undefined && stCopy.ans !== undefined) stCopy.a = String(stCopy.ans);
+      return stCopy;
+    });
+  }
+
+  if (Array.isArray(copy.options) && !copy.choices) {
+    copy.choices = copy.options.map(function(opt, idx) {
       var clean = String(opt !== undefined && opt !== null ? opt : "").replace(/^\d+번\s*[:.]?\s*/, "");
       return (idx + 1) + "번: " + clean;
     });
-    if (typeof item.ans === "number") {
-      item.ans = String(item.ans + 1);
-    } else if (item.a !== undefined && item.ans === undefined && !isNaN(Number(item.a))) {
-      item.ans = String(Number(item.a) + 1);
+    if (typeof copy.ans === "number") {
+      copy.ans = String(copy.ans + 1);
+    } else if (copy.a !== undefined && copy.ans === undefined && !isNaN(Number(copy.a))) {
+      copy.ans = String(Number(copy.a) + 1);
     }
-  }
-
-  if (item.ans === undefined && item.a !== undefined) {
-    item.ans = String(item.a);
-  }
-  if (item.a === undefined && item.ans !== undefined) {
-    item.a = String(item.ans);
-  }
-
-  if (item.num !== undefined && item.den !== undefined && (item.ans === undefined || item.ans === "")) {
-    item.ans = item.whole ? (item.whole + "과 " + item.num + "/" + item.den) : (item.num + "/" + item.den);
-    item.a = item.ans;
-  }
-
-  if (Array.isArray(item.steps)) {
-    item.steps.forEach(function(st) {
-      if (!st || typeof st !== "object") return;
-      if (st.ans === undefined && st.a !== undefined) st.ans = String(st.a);
-      if (st.a === undefined && st.ans !== undefined) st.a = String(st.ans);
+  } else if (Array.isArray(copy.choices)) {
+    copy.choices = copy.choices.map(function(opt, idx) {
+      var str = String(opt !== undefined && opt !== null ? opt : "");
+      return /^\d+번/.test(str) ? str : ((idx + 1) + "번: " + str);
     });
   }
 
-  return item;
+  if (copy.ans === undefined && copy.a !== undefined) {
+    copy.ans = String(copy.a);
+  }
+  if (copy.a === undefined && copy.ans !== undefined) {
+    copy.a = String(copy.ans);
+  }
+
+  if (copy.num !== undefined && copy.den !== undefined && (copy.ans === undefined || copy.ans === "")) {
+    copy.ans = copy.whole ? (copy.whole + "과 " + copy.num + "/" + copy.den) : (copy.num + "/" + copy.den);
+    copy.a = copy.ans;
+  }
+
+  return copy;
 }
 
 function isSmallStepAnswerMatch(userVal, st) {
@@ -85,6 +96,17 @@ function getSmallStepHTML() {
     "</div>";
 }
 
+function gcdTwoNums(a, b) {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b > 0) {
+    var t = a % b;
+    a = b;
+    b = t;
+  }
+  return a || 1;
+}
+
 function buildSmallSteps(rawItem) {
   var item = ensureNormalizedItem(rawItem);
   if (!item) return [];
@@ -93,9 +115,12 @@ function buildSmallSteps(rawItem) {
     return item.steps;
   }
 
-  var q = item.q || "";
+  var q = String(item.q || "");
 
-  if (!/÷\s*\d+\s*[./과와]/.test(q)) {
+  // ★ 6번 지적 반영: 덧셈(+)이나 뺄셈(-), 다른 연산이 섞인 복합식이 아닐 때만 자동 분수 계단 생성 + 마지막 기약분수 확인 단계 포함!
+  var hasOtherOps = /[+\-]/.test(q) || (q.match(/[÷×]/g) || []).length > 1;
+
+  if (!hasOtherOps && !/÷\s*\d+\s*[./과와]/.test(q)) {
     var mixedMatch = q.match(/(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)\s*÷\s*(\d+)(?![.\d/과와])/);
     if (mixedMatch) {
       var w = parseInt(mixedMatch[1], 10);
@@ -105,10 +130,17 @@ function buildSmallSteps(rawItem) {
       if (c > 0) {
         var impN = w * d + n;
         var rawD = d * c;
-        return [
-          { q: "1계단: 대분수 " + w + "과 " + n + "/" + d + "을 가분수로 바꾸면 몇 분의 몇일까요? 분자(" + w + "×" + d + "+" + n + ")에 들어갈 숫자를 적어보세요.", ans: String(impN) },
-          { q: "2계단: 나누기 " + c + "(÷ " + c + ")를 곱셈(× 1/" + c + ")으로 바꾸어 분모 " + d + "에 " + c + "를 곱하면(" + d + "×" + c + ") 분모는 얼마가 될까요?", ans: String(rawD) }
+        var g1 = gcdTwoNums(impN, rawD);
+        var simpN = impN / g1;
+        var simpD = rawD / g1;
+        var stepsArr = [
+          { q: "1계단: 대분수 " + w + "과 " + n + "/" + d + "을 가분수로 바꾸면 분자(" + w + "×" + d + "+" + n + ")는 얼마인가요?", ans: String(impN) },
+          { q: "2계단: 나누기 " + c + "(÷ " + c + ")를 곱셈(× 1/" + c + ")으로 바꾸어 분모 " + d + "에 " + c + "를 곱하면 분모는 얼마인가요?", ans: String(rawD) }
         ];
+        if (g1 > 1) {
+          stepsArr.push({ q: "3계단: " + impN + "/" + rawD + "을 기약분수로 약분하면 몇 분의 몇인가요? (분자/분모 형식으로 입력)", ans: simpN + "/" + simpD });
+        }
+        return stepsArr;
       }
     }
 
@@ -124,10 +156,16 @@ function buildSmallSteps(rawItem) {
             { q: "2계단: 분모 자리에 그대로 적어야 할 숫자는 얼마일까요?", ans: String(fd) }
           ];
         }
-        return [
+        var rawD2 = fd * fc;
+        var g2 = gcdTwoNums(fn, rawD2);
+        var fSteps = [
           { q: "1계단: 나누기 " + fc + "(÷ " + fc + ")를 곱하기 1/" + fc + "로 바꾸면 분자(" + fn + "×1)는 얼마가 될까요?", ans: String(fn) },
-          { q: "2계단: 분모 " + fd + "에 " + fc + "를 곱하면(" + fd + " × " + fc + ") 분모는 얼마가 될까요?", ans: String(fd * fc) }
+          { q: "2계단: 분모 " + fd + "에 " + fc + "를 곱하면(" + fd + " × " + fc + ") 분모는 얼마가 될까요?", ans: String(rawD2) }
         ];
+        if (g2 > 1) {
+          fSteps.push({ q: "3계단: " + fn + "/" + rawD2 + "을 약분하여 기약분수로 나타내면 얼마인가요? (분자/분모 형식)", ans: (fn / g2) + "/" + (rawD2 / g2) });
+        }
+        return fSteps;
       }
     }
   }
@@ -154,7 +192,8 @@ function activateSmallStepIfNeeded() {
   var list = document.getElementById("small-step-list");
   if (!box || !list || !state.currentItem) return;
 
-  ensureNormalizedItem(state.currentItem);
+  // ★ 2번 & 4번 지적 반영: state.currentItem 원본 변경 호출 제거 + 진행 중이던 이전 AI 요청 무효화!
+  cancelPendingAiRequests();
   state.smallSteps = buildSmallSteps(state.currentItem);
   state.smallStepIdx = 0;
   state.activeSmallStepForAI = null;
@@ -204,6 +243,8 @@ function checkSmallStep(idx) {
   var targetStepAns = String(st.ans !== undefined ? st.ans : (st.a !== undefined ? st.a : ""));
 
   if (isSmallStepAnswerMatch(val, st)) {
+    // ★ 4번 지적 반영: 계단을 통과하는 순간 대기 중이던 이전 계단 AI 응답 폐기!
+    cancelPendingAiRequests();
     state.activeSmallStepForAI = null;
     state.smallStepIdx++;
     if (state.smallStepIdx < state.smallSteps.length) {
@@ -239,6 +280,28 @@ function checkSmallStep(idx) {
 var aiIsRequesting = false;
 var aiRequestSeq = 0;
 
+function setAiSendButtonDisabled(disabled) {
+  var sendBtn = document.getElementById("ai-send-btn");
+  if (sendBtn) sendBtn.disabled = Boolean(disabled);
+}
+
+function cancelPendingAiRequests() {
+  aiRequestSeq++;
+  aiIsRequesting = false;
+  setAiSendButtonDisabled(false);
+}
+
+// ★ 3번 지적 완벽 반영: 새 문제로 넘어갈 때 AI 상태와 진행 중인 비동기 요청을 완전히 초기화!
+function resetAiTutorState() {
+  aiRequestSeq++;
+  aiIsRequesting = false;
+  if (typeof state !== "undefined" && state) {
+    state.aiChatHistory = [];
+    state.activeSmallStepForAI = null;
+  }
+  setAiSendButtonDisabled(false);
+}
+
 function getAiTutorHTML() {
   var rawItem = (typeof state !== "undefined" && state.currentItem) ? state.currentItem : {};
   var item = ensureNormalizedItem(rawItem) || {};
@@ -259,9 +322,12 @@ function getAiTutorHTML() {
     btns.push("<button type=\x22button\x22 style=\x22" + symbolBtnStyle + "\x22 onclick=\x22insertAiSymbol(\x27+\x27)\x22>+</button>");
   }
 
+  // ★ 7번 지적 반영: 객관식 보기가 몇 개든 실제 보기 개수(1번~4번 등)만큼 간편 입력 버튼 생성!
   if (isChoice) {
-    btns.push("<button type=\x22button\x22 style=\x22" + symbolBtnStyle + "\x22 onclick=\x22insertAiSymbol(\x271번\x27)\x22>1번</button>");
-    btns.push("<button type=\x22button\x22 style=\x22" + symbolBtnStyle + "\x22 onclick=\x22insertAiSymbol(\x272번\x27)\x22>2번</button>");
+    for (var cIdx = 0; cIdx < item.choices.length; cIdx++) {
+      var numLabel = (cIdx + 1) + "번";
+      btns.push("<button type=\x22button\x22 style=\x22" + symbolBtnStyle + "\x22 onclick=\x22insertAiSymbol(\x27" + numLabel + "\x27)\x22>" + numLabel + "</button>");
+    }
   }
 
   var helperBarHTML = btns.length > 0
@@ -305,9 +371,21 @@ function cleanHintIntoExplanation(rawText, targetAns) {
 
 function getProblemContextForAI(rawItem) {
   var item = ensureNormalizedItem(rawItem);
-  if (!item) return { qText: "", targetAns: "", choiceInfo: "", rawCorrectChoice: "", whyReason: "" };
+  if (!item) return { qText: "", targetAns: "", choiceInfo: "", rawCorrectChoice: "", whyReason: "", diagramInfo: "" };
 
-  var cleanQText = String(item.q || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  var rawQ = String(item.q || "");
+  // ★ 8번 지적 반영: SVG 안의 텍스트나 diagramDescription이 있으면 추출하여 AI에게 그림 정보로 제공!
+  var svgTexts = [];
+  rawQ.replace(/<text[^>]*>([\s\S]*?)<\/text>/gi, function(_, inner) {
+    var t = inner.replace(/<[^>]*>/g, "").trim();
+    if (t) svgTexts.push(t);
+    return "";
+  });
+  var diagramInfo = item.diagramDescription
+    ? String(item.diagramDescription)
+    : (svgTexts.length > 0 ? ("그림 속 표시된 텍스트/수치: " + svgTexts.join(", ")) : "");
+
+  var cleanQText = rawQ.replace(/<svg[\s\S]*?<\/svg>/gi, " [그림 참조] ").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   var isChoice = Array.isArray(item.choices) && item.choices.length > 0;
   var rawAnsStr = String(item.ans !== undefined ? item.ans : (item.a !== undefined ? item.a : ""));
 
@@ -330,6 +408,7 @@ function getProblemContextForAI(rawItem) {
     return {
       isChoice: true,
       qText: cleanQText,
+      diagramInfo: diagramInfo,
       choiceInfo: "선택지 목록: " + item.choices.join(" / "),
       targetAns: rawAnsStr + "번 (" + rawChoice + ")",
       rawCorrectChoice: rawChoice.replace(/^\d+번\s*[:.]?\s*/, "").trim(),
@@ -340,6 +419,7 @@ function getProblemContextForAI(rawItem) {
   return {
     isChoice: false,
     qText: cleanQText,
+    diagramInfo: diagramInfo,
     choiceInfo: "",
     targetAns: targetAns,
     rawCorrectChoice: targetAns,
@@ -414,7 +494,11 @@ async function openAiTutorForStep(situationDesc, wrongVal, stepQ, stepAns) {
   if (!box || !log) return;
 
   var myReqId = ++aiRequestSeq;
+  var myItemRef = state.currentItem;
+  var myStepIdx = state.activeSmallStepForAI ? state.activeSmallStepForAI.idx : -1;
+
   aiIsRequesting = true;
+  setAiSendButtonDisabled(true);
 
   box.style.display = "block";
   state.aiChatHistory = [];
@@ -428,7 +512,8 @@ async function openAiTutorForStep(situationDesc, wrongVal, stepQ, stepAns) {
 
   var firstPrompt = [
     "[원래 본문제]: \x22" + ctx.qText + "\x22",
-    (ctx.choiceInfo && !stepQ) ? ctx.choiceInfo : "",
+    ctx.diagramInfo ? ("[그림/도형 정보]: " + ctx.diagramInfo) : "",
+    ctx.choiceInfo ? ctx.choiceInfo : "",
     prevStepsInfo ? prevStepsInfo : "",
     "[현재 학생이 풀고 있는 질문]: \x22" + focusQ + "\x22",
     "[이 질문의 목표 정답(절대 학생에게 먼저 말하지 말 것!)]: \x22" + focusAns + "\x22",
@@ -444,13 +529,20 @@ async function openAiTutorForStep(situationDesc, wrongVal, stepQ, stepAns) {
     ? ("현재 단계 질문(\x22" + stepQ + "\x22)을 위 원래 문제의 숫자와 비교하며 다시 한번 천천히 계산해 보세요!")
     : ((state.currentItem && state.currentItem.h1) ? state.currentItem.h1 : "위 문제를 천천히 다시 읽어보세요!");
 
-  var reply = await callGeminiSocraticAPI(firstPrompt, [], fallbackHint);
+  try {
+    var reply = await callGeminiSocraticAPI(firstPrompt, [], fallbackHint);
+    var curStepIdx = state.activeSmallStepForAI ? state.activeSmallStepForAI.idx : -1;
+    if (myReqId !== aiRequestSeq || myItemRef !== state.currentItem || myStepIdx !== curStepIdx) return;
 
-  if (myReqId !== aiRequestSeq) return;
-  aiIsRequesting = false;
-
-  state.aiChatHistory.push({ role: "model", text: reply });
-  renderAiChatLog();
+    // ★ 4번 지적 완벽 반영: 첫 응답도 escapeHtml(reply)로 통일하여 태그 깨짐 및 이중 이스케이프 방지!
+    state.aiChatHistory.push({ role: "model", text: escapeHtml(reply) });
+    renderAiChatLog();
+  } finally {
+    if (myReqId === aiRequestSeq) {
+      aiIsRequesting = false;
+      setAiSendButtonDisabled(false);
+    }
+  }
 }
 
 function renderAiChatLog() {
@@ -524,9 +616,11 @@ async function sendAiUserMessage() {
   }
 
   var myReqId = ++aiRequestSeq;
+  var myItemRef = state.currentItem;
+  var myStepIdx = activeStep ? activeStep.idx : -1;
+
   aiIsRequesting = true;
-  var sendBtn = document.getElementById("ai-send-btn");
-  if (sendBtn) sendBtn.disabled = true;
+  setAiSendButtonDisabled(true);
 
   log.innerHTML += "<div class=\x22chat-bubble chat-ai\x22>⏳ AI 선생님이 답변을 적고 있어요...</div>";
   log.scrollTop = log.scrollHeight;
@@ -538,9 +632,12 @@ async function sendAiUserMessage() {
     : "";
   var prevStepsInfo = getPreviousSmallStepsSummary();
 
+  // ★ 7번 & 8번 지적 반영: 후속 대화에서도 객관식 보기 목록(choiceInfo)과 그림 정보(diagramInfo)를 항상 포함!
   var systemGuide = [
     "당신은 다정하고 정확한 초등 수학 소크라테스 AI 선생님입니다.",
     "[원래 본문제]: \x22" + ctx.qText + "\x22",
+    ctx.diagramInfo ? ("[그림/도형 정보]: " + ctx.diagramInfo) : "",
+    ctx.choiceInfo ? ctx.choiceInfo : "",
     prevStepsInfo ? prevStepsInfo : "",
     "[현재 우리가 풀어야 할 목표 질문]: \x22" + currentGoalQ + "\x22",
     "[이 목표 질문의 최종 답(비밀)]: \x22" + currentGoalAns + "\x22" + currentAccepts + " (절대 학생에게 먼저 말하지 마세요!)",
@@ -561,28 +658,35 @@ async function sendAiUserMessage() {
     ? ("위쪽 스몰 스텝 질문(\x22" + activeStep.q + "\x22)의 힌트를 보고 빈칸에 알맞은 수를 직접 입력해 보세요!")
     : (item.h1 || "위 문제를 천천히 다시 읽어보세요!");
 
-  var reply = await callGeminiSocraticAPI(systemGuide, state.aiChatHistory, fallbackHint);
+  try {
+    var reply = await callGeminiSocraticAPI(systemGuide, state.aiChatHistory, fallbackHint);
+    var curStepIdx = state.activeSmallStepForAI ? state.activeSmallStepForAI.idx : -1;
+    if (myReqId !== aiRequestSeq || myItemRef !== state.currentItem || myStepIdx !== curStepIdx) return;
 
-  if (myReqId !== aiRequestSeq) return;
-  aiIsRequesting = false;
-  if (sendBtn) sendBtn.disabled = false;
-
-  reply = reply.replace(/\[완료\]/g, "").trim();
-
-  state.aiChatHistory.push({ role: "model", text: escapeHtml(reply) });
-  renderAiChatLog();
+    reply = reply.replace(/\[완료\]/g, "").trim();
+    state.aiChatHistory.push({ role: "model", text: escapeHtml(reply) });
+    renderAiChatLog();
+  } finally {
+    if (myReqId === aiRequestSeq) {
+      aiIsRequesting = false;
+      setAiSendButtonDisabled(false);
+    }
+  }
 }
 
+// ★ 4번 지적 완벽 반영: callGeminiSocraticAPI는 순수 텍스트만 반환하고, 화면 저장 직전에 딱 한 번만 escapeHtml 처리!
 async function callGeminiSocraticAPI(promptText, historyArr, fallbackHintText) {
   fallbackHintText = fallbackHintText !== undefined ? fallbackHintText : "";
 
   var apiKey = (typeof getSavedApiKey === "function") ? getSavedApiKey() : "";
   if (!apiKey && typeof loadCloudApiKey === "function") {
-    await loadCloudApiKey();
+    try {
+      await loadCloudApiKey();
+    } catch (e) {}
     apiKey = (typeof getSavedApiKey === "function") ? getSavedApiKey() : "";
   }
 
-  var safeHint = escapeHtml(fallbackHintText || (state.currentItem ? state.currentItem.h1 : "위 문제를 천천히 다시 읽어보세요!"));
+  var safeHint = fallbackHintText || (state.currentItem ? state.currentItem.h1 : "위 문제를 천천히 다시 읽어보세요!");
 
   if (!apiKey) {
     return "💡 (API 키 확인 필요) 우측 상단 [⚙️ API 키 설정]에서 키를 확인해 주세요. 지금은 이 힌트를 참고해 보세요: " + safeHint;
@@ -640,5 +744,5 @@ async function callGeminiSocraticAPI(promptText, historyArr, fallbackHintText) {
     }
   }
 
-  return "앗, AI 선생님 연결이 잠시 지연되고 있어요! (" + escapeHtml(lastErrorMsg || "응답 지연") + ")<br>대신 징검다리 힌트를 드릴게요: " + safeHint;
+  return "앗, AI 선생님 연결이 잠시 지연되고 있어요! (" + (lastErrorMsg || "응답 지연") + ") 대신 징검다리 힌트를 드릴게요: " + safeHint;
 }
