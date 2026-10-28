@@ -746,3 +746,273 @@ async function callGeminiSocraticAPI(promptText, historyArr, fallbackHintText) {
 
   return "앗, AI 선생님 연결이 잠시 지연되고 있어요! (" + (lastErrorMsg || "응답 지연") + ") 대신 징검다리 힌트를 드릴게요: " + safeHint;
 }
+// =========================================================================
+// 🎤 [추가 모듈] 한국어 수학 음성 인식기 (Web Speech API - 입력 후 수정 가능 방식)
+// =========================================================================
+let activeSpeechRec = null;
+let activeMicBtnId = null;
+
+// 한글 숫자/수식 발음을 아라비아 숫자와 수학 기호로 똑똑하게 변환
+function parseKoreanMathSpeech(rawText, mode = 'math') {
+  if (!rawText) return '';
+  let s = String(rawText).trim();
+
+  // AI 채팅 모드일 때는 문장 흐름을 살리고 연산 기호만 보기 좋게 보정
+  if (mode === 'chat') {
+    return s
+      .replace(/곱하기/g, '×')
+      .replace(/나누기/g, '÷')
+      .replace(/더하기/g, '+')
+      .replace(/빼기/g, '-')
+      .replace(/네모/g, '□');
+  }
+
+  // 기본 기호 및 소수점 변환
+  s = s.replace(/마이너스\s*|음수\s*/g, '-');
+  s = s.replace(/플러스\s*/g, '+');
+  s = s.replace(/곱하기/g, '×').replace(/나누기/g, '÷').replace(/더하기/g, '+').replace(/빼기/g, '-');
+  s = s.replace(/네모|빈칸/g, '□');
+  s = s.replace(/(\d+)\s*점\s*(\d+)/g, '$1.$2');
+  s = s.replace(/영점\s*(\d+)/g, '0.$1').replace(/공점\s*(\d+)/g, '0.$1');
+
+  // 자주 쓰는 고유어 숫자 변환 (한 개, 두 개 ... 스물 등)
+  const nativeMap = {
+    '스물': '20', '열아홉': '19', '열여덟': '18', '열일곱': '17', '열여섯': '16',
+    '열다섯': '15', '열네': '14', '열넷': '14', '열세': '13', '열셋': '13',
+    '열두': '12', '열둘': '12', '열한': '11', '열하나': '11', '열': '10',
+    '아홉': '9', '여덟': '8', '일곱': '7', '여섯': '6', '다섯': '5',
+    '네': '4', '넷': '4', '세': '3', '셋': '3', '두': '2', '둘': '2', '한': '1', '하나': '1'
+  };
+  Object.keys(nativeMap).forEach(k => {
+    const reg = new RegExp(`^${k}(?:개|명|번|칸|배|병|컵|자루|상자)?$`);
+    if (reg.test(s.replace(/\s+/g, ''))) {
+      s = nativeMap[k];
+    }
+  });
+
+  // 한자어 숫자 변환 (예: "이십사" -> 24, "삼분의 이" -> "3분의 2")
+  function korWordToNumStr(text) {
+    const digits = { '영':0, '공':0, '일':1, '이':2, '삼':3, '사':4, '오':5, '육':6, '륙':6, '칠':7, '팔':8, '구':9 };
+    const units = { '십':10, '백':100, '천':1000 };
+    return text.replace(/[영공일이삼사오육륙칠팔구십백천]+/g, (match) => {
+      if (match.length === 1 && units[match]) return String(units[match]);
+      let total = 0;
+      let current = 0;
+      for (let ch of match) {
+        if (digits[ch] !== undefined) {
+          current = digits[ch];
+        } else if (units[ch] !== undefined) {
+          total += (current === 0 ? 1 : current) * units[ch];
+          current = 0;
+        }
+      }
+      total += current;
+      return String(total);
+    });
+  }
+
+  s = korWordToNumStr(s);
+
+  // "3분의 2" -> "2/3", "1과 4분의 3" -> "1과 3/4" 변환
+  const mixedMatch = s.match(/(\d+)\s*[과와]\s*(\d+)\s*분의\s*(\d+)/);
+  if (mixedMatch) {
+    return `${mixedMatch[1]}과 ${mixedMatch[3]}/${mixedMatch[2]}`;
+  }
+  const fracMatch = s.match(/(\d+)\s*분의\s*(\d+)/);
+  if (fracMatch) {
+    return `${fracMatch[2]}/${fracMatch[1]}`;
+  }
+
+  // 끝에 붙은 불필요한 조사나 마침표 제거
+  s = s.replace(/입니다|이에요|예요|[.?~]/g, '').trim();
+  return s;
+}
+
+function stopActiveSpeechRec() {
+  if (activeSpeechRec) {
+    try { activeSpeechRec.stop(); } catch (e) {}
+    activeSpeechRec = null;
+  }
+  if (activeMicBtnId) {
+    const prevBtn = document.getElementById(activeMicBtnId);
+    if (prevBtn) {
+      prevBtn.style.background = '#eff6ff';
+      prevBtn.style.borderColor = '#93c5fd';
+      prevBtn.style.color = '#1d4ed8';
+      prevBtn.innerText = prevBtn.dataset.origLabel || '🎤 말하기';
+    }
+    activeMicBtnId = null;
+  }
+}
+
+// 1) 일반 입력칸 및 AI 채팅창 음성 입력
+function startVoiceForInput(inputId, btnId, mode = 'math') {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("현재 브라우저에서는 음성 인식을 지원하지 않습니다. 크롬(Chrome), 엣지(Edge) 또는 사파리(Safari)를 이용해 주세요!");
+    return;
+  }
+
+  if (activeSpeechRec && activeMicBtnId === btnId) {
+    stopActiveSpeechRec();
+    return;
+  }
+  stopActiveSpeechRec();
+
+  const inp = document.getElementById(inputId);
+  const btn = document.getElementById(btnId);
+  if (!inp) return;
+
+  const rec = new SpeechRecognition();
+  rec.lang = 'ko-KR';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+
+  activeSpeechRec = rec;
+  activeMicBtnId = btnId;
+
+  if (btn) {
+    if (!btn.dataset.origLabel) btn.dataset.origLabel = btn.innerText;
+    btn.style.background = '#fee2e2';
+    btn.style.borderColor = '#ef4444';
+    btn.style.color = '#dc2626';
+    btn.innerText = '🔴 듣는 중...';
+  }
+
+  rec.onresult = (event) => {
+    const rawTranscript = event.results[0][0].transcript || '';
+    const converted = parseKoreanMathSpeech(rawTranscript, mode);
+    inp.value = converted;
+    inp.focus(); // 학생이 눈으로 보고 바로 수정하거나 엔터를 칠 수 있도록 포커스 이동!
+  };
+
+  rec.onerror = (event) => {
+    if (event.error === 'not-allowed') {
+      alert("🎤 마이크 권한이 꺼져 있습니다. 주소창 왼쪽의 자물쇠(설정) 아이콘을 눌러 마이크를 [허용]해 주세요!");
+    }
+    stopActiveSpeechRec();
+  };
+
+  rec.onend = () => {
+    stopActiveSpeechRec();
+  };
+
+  try {
+    rec.start();
+  } catch (e) {
+    stopActiveSpeechRec();
+  }
+}
+
+// 2) 분수 위젯(자연수·분자·분모 3칸) 전용 음성 입력 ("일과 사분의 삼" -> 자연수:1, 분자:3, 분모:4 자동 분배!)
+function startVoiceForFraction(prefix, btnId) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("현재 브라우저에서는 음성 인식을 지원하지 않습니다. 크롬(Chrome)이나 사파리(Safari)를 이용해 주세요!");
+    return;
+  }
+
+  if (activeSpeechRec && activeMicBtnId === btnId) {
+    stopActiveSpeechRec();
+    return;
+  }
+  stopActiveSpeechRec();
+
+  const btn = document.getElementById(btnId);
+  const rec = new SpeechRecognition();
+  rec.lang = 'ko-KR';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+
+  activeSpeechRec = rec;
+  activeMicBtnId = btnId;
+
+  if (btn) {
+    if (!btn.dataset.origLabel) btn.dataset.origLabel = btn.innerText;
+    btn.style.background = '#fee2e2';
+    btn.style.borderColor = '#ef4444';
+    btn.style.color = '#dc2626';
+    btn.innerText = '🔴 분수 듣는 중... (예: 사분의 삼)';
+  }
+
+  rec.onresult = (event) => {
+    const rawTranscript = event.results[0][0].transcript || '';
+    const converted = parseKoreanMathSpeech(rawTranscript, 'math');
+
+    const wEl = document.getElementById(`${prefix}-whole`);
+    const nEl = document.getElementById(`${prefix}-num`);
+    const dEl = document.getElementById(`${prefix}-den`);
+
+    const mixed = converted.match(/^(\d+)\s*[과와]\s*(\d+)\s*\/\s*(\d+)$/);
+    const simple = converted.match(/^(\d+)\s*\/\s*(\d+)$/);
+
+    if (mixed) {
+      if (wEl) wEl.value = mixed[1];
+      if (nEl) nEl.value = mixed[2];
+      if (dEl) { dEl.value = mixed[3]; dEl.focus(); }
+    } else if (simple) {
+      if (wEl) wEl.value = '';
+      if (nEl) nEl.value = simple[1];
+      if (dEl) { dEl.value = simple[2]; dEl.focus(); }
+    } else {
+      // 숫자를 그냥 말한 경우(예: "3 과 4") 분자 칸에 우선 넣어 수정할 수 있게 함
+      const nums = converted.match(/\d+/g);
+      if (nums && nums.length === 3) {
+        if (wEl) wEl.value = nums[0];
+        if (nEl) nEl.value = nums[1];
+        if (dEl) { dEl.value = nums[2]; dEl.focus(); }
+      } else if (nums && nums.length === 2) {
+        if (wEl) wEl.value = '';
+        if (nEl) nEl.value = nums[0];
+        if (dEl) { dEl.value = nums[1]; dEl.focus(); }
+      } else if (nEl) {
+        nEl.value = converted.replace(/[^0-9]/g, '') || converted;
+        nEl.focus();
+      }
+    }
+  };
+
+  rec.onerror = () => stopActiveSpeechRec();
+  rec.onend = () => stopActiveSpeechRec();
+
+  try {
+    rec.start();
+  } catch (e) {
+    stopActiveSpeechRec();
+  }
+}
+
+// 3) tutor-helper.js의 스몰 스텝 입력칸 & 소크라테스 AI 채팅 입력칸에도 [🎤] 버튼 자동 부착!
+(function attachVoiceButtonsToTutorHelper() {
+  if (typeof window.getAiTutorHTML === 'function') {
+    const origGetAiTutorHTML = window.getAiTutorHTML;
+    window.getAiTutorHTML = function() {
+      const html = origGetAiTutorHTML();
+      return html.replace(
+        '<button type="button" id="ai-send-btn"',
+        '<button type="button" id="ai-mic-btn" onclick="startVoiceForInput(\x27ai-user-input\x27, \x27ai-mic-btn\x27, \x27chat\x27)" style="padding:10px 12px; border:2px solid #93c5fd; border-radius:10px; background:#eff6ff; color:#1d4ed8; font-weight:800; cursor:pointer; white-space:nowrap;">🎤 말하기</button><button type="button" id="ai-send-btn"'
+      );
+    };
+  }
+
+  if (typeof window.renderSmallSteps === 'function') {
+    const origRenderSmallSteps = window.renderSmallSteps;
+    window.renderSmallSteps = function() {
+      origRenderSmallSteps();
+      const idx = state.smallStepIdx;
+      const stepInp = document.getElementById(`step-inp-${idx}`);
+      if (stepInp && stepInp.parentElement && !document.getElementById(`step-mic-${idx}`)) {
+        const micBtn = document.createElement('button');
+        micBtn.type = 'button';
+        micBtn.id = `step-mic-${idx}`;
+        micBtn.innerText = '🎤';
+        micBtn.title = '말로 입력하기';
+        micBtn.style.cssText = 'padding:10px 12px; border:2px solid #93c5fd; border-radius:8px; background:#eff6ff; color:#1d4ed8; font-weight:800; cursor:pointer; flex-shrink:0;';
+        micBtn.onclick = function() {
+          startVoiceForInput(`step-inp-${idx}`, `step-mic-${idx}`, 'math');
+        };
+        stepInp.parentElement.insertBefore(micBtn, stepInp.nextSibling);
+      }
+    };
+  }
+})();

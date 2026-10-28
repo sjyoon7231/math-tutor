@@ -1,5 +1,5 @@
 // =========================================================================
-// 🚀 app.js - 초등 수학 AI 자기주도 완전학습 메인 엔진 (최종 무결점 완본)
+// 🚀 app.js - 초등 수학 AI 자기주도 완전학습 메인 엔진 (5·6학년 모든 구조 호환 + 🎤 음성 입력 탑재 완본)
 // =========================================================================
 
 let viewSessionId = 0;
@@ -38,16 +38,36 @@ function shuffleArray(arr) {
 // 1. 5학년 & 6학년 모든 단원 데이터 구조 자동 해독 및 표준화 어댑터 (원본 보존형)
 // -------------------------------------------------------------------------
 function normalizeQuestionItem(rawItem) {
-  if (!rawItem || typeof rawItem !== 'object') return rawItem;
-  if (rawItem.__normalized) return rawItem;
+  if (!rawItem) return rawItem;
+
+  if (Array.isArray(rawItem)) {
+    const picked = rawItem[Math.floor(Math.random() * rawItem.length)];
+    return normalizeQuestionItem(picked);
+  }
+
+  if (typeof rawItem !== 'object') return rawItem;
+  if (rawItem.__normalized && rawItem.q !== undefined) return rawItem;
 
   const item = Object.assign({}, rawItem, { __normalized: true });
+
+  if (item.q === undefined) {
+    item.q = item.question ?? item.text ?? item.problem ?? item.prompt ?? item.title ?? '';
+  }
+
+  if (item.h1 === undefined) {
+    item.h1 = item.hint1 ?? item.hint ?? item.guide ?? '';
+  }
+  if (item.h2 === undefined) {
+    item.h2 = item.hint2 ?? item.explanation ?? item.exp ?? item.desc ?? item.h1 ?? '';
+  }
 
   if (Array.isArray(rawItem.steps)) {
     item.steps = rawItem.steps.map(st => {
       if (!st || typeof st !== 'object') return st;
       const stCopy = Object.assign({}, st);
+      if (stCopy.q === undefined) stCopy.q = stCopy.question ?? stCopy.text ?? stCopy.step ?? '';
       if (stCopy.ans === undefined && stCopy.a !== undefined) stCopy.ans = String(stCopy.a);
+      if (stCopy.ans === undefined && stCopy.answer !== undefined) stCopy.ans = String(stCopy.answer);
       if (stCopy.a === undefined && stCopy.ans !== undefined) stCopy.a = String(stCopy.ans);
       return stCopy;
     });
@@ -89,6 +109,42 @@ function normalizeQuestionItem(rawItem) {
   return item;
 }
 
+function flattenQuestionPool(rawPool) {
+  if (!rawPool) return [];
+  if (Array.isArray(rawPool)) {
+    const flat = [];
+    rawPool.forEach(entry => {
+      if (Array.isArray(entry)) {
+        entry.forEach(sub => {
+          if (sub && typeof sub === 'object') flat.push(normalizeQuestionItem(sub));
+        });
+      } else if (entry && typeof entry === 'object') {
+        if (entry.q === undefined && entry.question === undefined && entry.text === undefined && Array.isArray(entry.items || entry.pool || entry.list || entry.questions)) {
+          const innerArr = entry.items || entry.pool || entry.list || entry.questions;
+          innerArr.forEach(sub => {
+            if (sub && typeof sub === 'object') flat.push(normalizeQuestionItem(sub));
+          });
+        } else {
+          flat.push(normalizeQuestionItem(entry));
+        }
+      }
+    });
+    return flat;
+  }
+  if (typeof rawPool === 'object') {
+    if (rawPool.q !== undefined || rawPool.question !== undefined || rawPool.text !== undefined || rawPool.ans !== undefined || rawPool.a !== undefined || rawPool.num !== undefined) {
+      return [normalizeQuestionItem(rawPool)];
+    }
+    if (Array.isArray(rawPool.pool || rawPool.items || rawPool.list || rawPool.questions)) {
+      return flattenQuestionPool(rawPool.pool || rawPool.items || rawPool.list || rawPool.questions);
+    }
+    return Object.values(rawPool)
+      .filter(v => v && typeof v === 'object')
+      .map(normalizeQuestionItem);
+  }
+  return [];
+}
+
 function normalizeLessonObj(rawLes, fallbackCode) {
   if (!rawLes || typeof rawLes !== 'object') return rawLes;
   const les = Object.assign({}, rawLes);
@@ -96,28 +152,26 @@ function normalizeLessonObj(rawLes, fallbackCode) {
   if (!les.id && fallbackCode) les.id = fallbackCode;
   if (!les.title && les.name) les.title = les.name;
 
-  if (!les.step1Quiz && les.quiz) les.step1Quiz = les.quiz;
-  if (!les.step1Quiz && les.step1) les.step1Quiz = les.step1;
-  if (!les.step2_1 && les.step2A) les.step2_1 = les.step2A;
-  if (!les.step2_2 && les.step2B) les.step2_2 = les.step2B;
-  if (!les.step3A && les.step3) les.step3A = les.step3;
-  if (!les.step4B && les.step4) les.step4B = les.step4;
+  if (!les.step1Quiz) les.step1Quiz = les.quiz || les.step1 || les.conceptQuiz;
+  if (!les.step2_1) les.step2_1 = les.step2A || les.step2_a || (les.step2 && les.step2.together) || les.together;
+  if (!les.step2_2) les.step2_2 = les.step2B || les.step2_b || (les.step2 && les.step2.alone) || les.alone;
+  if (!les.step3A) les.step3A = les.step3 || les.step3_a || les.blindTest || les.testA || les.questionsA;
+  if (!les.step4B) les.step4B = les.step4 || les.step4_b || les.twinTest || les.testB || les.questionsB || les.twin;
 
   const listKeys = ['warmup', 'step1Quiz', 'step2_1', 'step2_2', 'step3A', 'step4B'];
   listKeys.forEach(k => {
-    if (Array.isArray(les[k])) {
-      les[k] = les[k].map(normalizeQuestionItem);
-    } else if (les[k] && typeof les[k] === 'object') {
-      les[k] = [normalizeQuestionItem(les[k])];
+    if (les[k]) {
+      les[k] = flattenQuestionPool(les[k]);
     }
   });
 
+  const step5AString = typeof les.step5A === 'string' ? les.step5A : '';
   if (les.step5B && typeof les.step5B === 'object') {
-    les.readSentence = les.readSentence || les.step5B.sentence || les.step5A || '';
+    les.readSentence = les.readSentence || les.step5B.sentence || step5AString || '';
   } else if (typeof les.step5B === 'string') {
     les.readSentence = les.readSentence || les.step5B;
-  } else if (!les.readSentence && les.step5A) {
-    les.readSentence = les.step5A;
+  } else if (!les.readSentence && step5AString) {
+    les.readSentence = step5AString;
   }
 
   return les;
@@ -142,8 +196,11 @@ function normalizeAllMathData() {
     const unitNum = unitKey.split('-')[2] || '1';
 
     if (!Array.isArray(rawUnit) && typeof rawUnit === 'object') {
-      if (rawUnit.lessons && typeof rawUnit.lessons === 'object') {
-        rawUnit = rawUnit.lessons;
+      const parentOrder = Array.isArray(rawUnit.lessonOrder) ? rawUnit.lessonOrder : null;
+      if (rawUnit.lessons && typeof rawUnit.lessons === 'object' && !Array.isArray(rawUnit.lessons)) {
+        rawUnit = Object.assign({}, rawUnit.lessons, parentOrder ? { lessonOrder: parentOrder } : {});
+      } else if (rawUnit.items && typeof rawUnit.items === 'object' && !Array.isArray(rawUnit.items)) {
+        rawUnit = Object.assign({}, rawUnit.items, parentOrder ? { lessonOrder: parentOrder } : {});
       } else if (Array.isArray(rawUnit.items)) {
         rawUnit = rawUnit.items;
       } else if (Array.isArray(rawUnit.list)) {
@@ -164,7 +221,7 @@ function normalizeAllMathData() {
     }
 
     if (typeof rawUnit === 'object') {
-      const metaKeys = ['lessonOrder', 'title', 'name', 'desc', 'description', 'unit', 'grade', 'semester', 'unitId', 'unitNum', 'subtitle', 'lessonTitles'];
+      const metaKeys = ['lessonOrder', 'title', 'unitTitle', 'name', 'desc', 'description', 'unit', 'grade', 'semester', 'unitId', 'unitNum', 'subtitle', 'lessonTitles', 'items', 'lessons'];
       const validCodes = [];
 
       if (Array.isArray(rawUnit.lessonOrder)) {
@@ -192,11 +249,11 @@ function normalizeAllMathData() {
         });
       }
 
-      rawUnit.lessonOrder = validCodes;
+      const clonedUnit = Object.assign({}, rawUnit, { lessonOrder: validCodes });
       validCodes.forEach(code => {
-        rawUnit[code] = normalizeLessonObj(rawUnit[code], code);
+        clonedUnit[code] = normalizeLessonObj(rawUnit[code], code);
       });
-      lessons[unitKey] = rawUnit;
+      lessons[unitKey] = clonedUnit;
     }
   });
 }
@@ -279,6 +336,7 @@ function cleanupOnNavigation() {
   viewSessionId++;
   stopAllStepTimers();
   clearPendingReadTimer();
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   if (typeof resetAiTutorState === 'function') resetAiTutorState();
 }
 
@@ -444,7 +502,7 @@ function showLessonSelect(grade, semester, unit) {
       <button type="button" class="menu-item" onclick="startLesson('${code}')">
         <div>
           <div class="menu-title">${isMasterLesson ? '👑' : '✏️'} [${code}차시] ${cleanTitle}</div>
-          <div class="menu-desc">${isMasterLesson ? '단원 전체 핵심 요약 카드 & 고난도 응용 총정리' : '1분 개념 영상 ➔ 함께·혼자 풀기 ➔ 3문항 실력 확인 ➔ 쌍둥이 클리닉'}</div>
+          <div class="menu-desc">${isMasterLesson ? '단원 전체 핵심 요약 카드 & 고난도 응용 총정리' : (les.goal || '1분 개념 영상 ➔ 함께·혼자 풀기 ➔ 3문항 실력 확인 ➔ 쌍둥이 클리닉')}</div>
         </div>
         ${badgeHTML}
       </button>
@@ -526,6 +584,7 @@ function startLesson(lessonId) {
 }
 
 function showStep1Concept() {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   if (typeof resetAiTutorState === 'function') resetAiTutorState();
   startStepTimer('step1');
   setHeaderUI(`1단계: 개념 익히기`, true, true);
@@ -534,7 +593,7 @@ function showStep1Concept() {
   const les = state.lessonData;
   const cleanTitle = String(les.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
   const embedUrl = getCleanYoutubeEmbedUrl(les.videoUrl);
-  const sc = les.summaryCard || {};
+  const sc = les.summaryCard;
 
   const videoHTML = embedUrl ? `
     <div class="video-box">
@@ -549,21 +608,28 @@ function showStep1Concept() {
     </div>
   `;
 
-  const rulesHTML = Array.isArray(sc.rules)
-    ? sc.rules.map(r => `<div style="margin-bottom:6px; font-weight:bold; color:#1e293b;">${r}</div>`).join('')
-    : (sc.content ? `<div style="font-weight:bold; color:#1e293b;">${sc.content}</div>` : '');
-
-  const cardHTML = (sc.title || sc.svg || rulesHTML) ? `
-    <div class="summary-card">
-      ${sc.title ? `<div style="font-size:18px; font-weight:800; color:#b45309; margin-bottom:10px;">📌 ${sc.title}</div>` : ''}
-      ${sc.svg ? `<div style="margin-bottom:12px; background:#ffffff; border-radius:12px; padding:8px; overflow-x:auto;">${sc.svg}</div>` : ''}
-      ${rulesHTML}
-    </div>
-  ` : '';
+  let cardHTML = '';
+  if (typeof sc === 'string' && sc.trim() !== '') {
+    cardHTML = `<div style="margin-bottom:16px;">${sc}</div>`;
+  } else if (sc && typeof sc === 'object') {
+    const rulesHTML = Array.isArray(sc.rules)
+      ? sc.rules.map(r => `<div style="margin-bottom:6px; font-weight:bold; color:#1e293b;">${r}</div>`).join('')
+      : (sc.content ? `<div style="font-weight:bold; color:#1e293b;">${sc.content}</div>` : '');
+    if (sc.title || sc.svg || rulesHTML) {
+      cardHTML = `
+        <div class="summary-card">
+          ${sc.title ? `<div style="font-size:18px; font-weight:800; color:#b45309; margin-bottom:10px;">📌 ${sc.title}</div>` : ''}
+          ${sc.svg ? `<div style="margin-bottom:12px; background:#ffffff; border-radius:12px; padding:8px; overflow-x:auto;">${sc.svg}</div>` : ''}
+          ${rulesHTML}
+        </div>
+      `;
+    }
+  }
 
   const content = document.getElementById('app-content');
   content.innerHTML = `
     <h2>🎬 1단계: [${state.lessonId}] ${cleanTitle}</h2>
+    ${les.goal ? `<div class="goal-box">🎯 <b>학습 목표:</b> ${les.goal}</div>` : ''}
     ${videoHTML}
     ${cardHTML}
     <button type="button" class="btn" onclick="startStep1Quiz()">✅ 개념을 이해했어요! 확인 퀴즈 풀기 👉</button>
@@ -636,9 +702,8 @@ function startStep2_2() {
 }
 
 // -------------------------------------------------------------------------
-// 🧩 5. 양방향 문제 풀이 렌더러 & 정교한 수학 동치 채점기
+// 🧩 5. 양방향 문제 풀이 렌더러 & 정교한 수학 동치 채점기 (🎤 음성 입력 버튼 포함)
 // -------------------------------------------------------------------------
-// ★ 대분수 문자열("1과 1/2")로만 저장된 문제도 분수 문제로 정확히 인식!
 function isFractionProblem(item) {
   if (!item || typeof item !== 'object') return false;
   if (item.num !== undefined && item.den !== undefined) return true;
@@ -691,7 +756,7 @@ function buildAnswerInputHTML(item, prefix = 'ans') {
 
   if (isFractionProblem(item)) {
     return `
-      <div class="fraction-widget">
+      <div class="fraction-widget" style="flex-wrap:wrap;">
         <input type="text" id="${prefix}-whole" class="whole-input" placeholder="자연수" autocomplete="off">
         <div class="frac-col">
           <input type="text" id="${prefix}-num" class="frac-input" placeholder="분자" autocomplete="off">
@@ -699,16 +764,19 @@ function buildAnswerInputHTML(item, prefix = 'ans') {
           <input type="text" id="${prefix}-den" class="frac-input" placeholder="분모" autocomplete="off" onkeydown="if(event.key==='Enter') submitInteractiveText()">
         </div>
         ${item.unit ? `<span style="font-size:18px; font-weight:bold;">${item.unit}</span>` : ''}
+        <button type="button" id="${prefix}-mic-btn" onclick="startVoiceForFraction('${prefix}', '${prefix}-mic-btn')" style="padding:10px 14px; border:2px solid #93c5fd; border-radius:10px; background:#eff6ff; color:#1d4ed8; font-size:14px; font-weight:800; cursor:pointer;">🎤 말로 분수 넣기</button>
       </div>
-      <div class="helper-caption">💡 진분수나 가분수는 앞의 [자연수] 칸을 비워 두고 분자와 분모만 입력하세요!</div>
+      <div class="helper-caption">💡 진분수·가분수는 [자연수] 칸을 비워 두세요! (🎤 마이크를 누르고 "사분의 삼"처럼 말해도 자동 입력돼요)</div>
       <button type="button" class="btn" onclick="submitInteractiveText()">정답 확인하기</button>
     `;
   }
 
+  const ph = item.placeholder ? safeEscapeHtml(item.placeholder) : '정답을 입력하세요';
   return `
     <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-      <input type="text" id="${prefix}-input" class="text-input" style="margin-bottom:0;" placeholder="정답을 입력하세요" autocomplete="off" onkeydown="if(event.key==='Enter') submitInteractiveText()">
+      <input type="text" id="${prefix}-input" class="text-input" style="margin-bottom:0; flex:1;" placeholder="${ph}" autocomplete="off" onkeydown="if(event.key==='Enter') submitInteractiveText()">
       ${item.unit ? `<span style="font-size:19px; font-weight:bold; white-space:nowrap;">${item.unit}</span>` : ''}
+      <button type="button" id="${prefix}-mic-btn" onclick="startVoiceForInput('${prefix}-input', '${prefix}-mic-btn', 'math')" style="padding:12px 14px; border:2px solid #93c5fd; border-radius:12px; background:#eff6ff; color:#1d4ed8; font-size:15px; font-weight:800; cursor:pointer; white-space:nowrap;">🎤 말하기</button>
     </div>
     <button type="button" class="btn" onclick="submitInteractiveText()">정답 확인하기</button>
   `;
@@ -725,7 +793,6 @@ function readUserAnswerFromDOM(item, prefix = 'ans') {
   return (document.getElementById(`${prefix}-input`)?.value || '').trim();
 }
 
-// ★ 분수 조건별 채점(특정 분모 지정, 기약분수 여부, 대분수/가분수 동치) 및 명시적 속성 완벽 지원!
 function checkAnswerMatch(userVal, item) {
   if (userVal === undefined || userVal === null || String(userVal).trim() === '') return false;
 
@@ -735,7 +802,6 @@ function checkAnswerMatch(userVal, item) {
   const targetStr = String(item.ans ?? item.a ?? '').replace(/(\d),(?=\d{3}(?!\d))/g, '$1').trim();
   const normTarget = normalizeMathText(targetStr);
 
-  // 1) 기본 정답 텍스트 및 accept(명시적 허용 답안) 최우선 검사!
   if (cleanUser === normTarget) return true;
   if (item.unit && cleanUser === normalizeMathText(`${targetStr}${item.unit}`)) return true;
   if (Array.isArray(item.accept)) {
@@ -744,7 +810,6 @@ function checkAnswerMatch(userVal, item) {
     }
   }
 
-  // 2) 분수 문제 정밀 채점
   if (isFractionProblem(item)) {
     let targetW = item.whole ? parseInt(item.whole, 10) : 0;
     let targetN = item.num !== undefined ? parseInt(item.num, 10) : null;
@@ -766,8 +831,6 @@ function checkAnswerMatch(userVal, item) {
       if (isSameValue) {
         const qText = String(item.q || '');
 
-        // (A) 특정 분모가 지정된 문제(예: "분모가 4인 분수" 또는 requiredDenominator 속성)이거나,
-        // 원래 정답 자체가 약분되지 않은 분수(예: 통분 과정의 2/4)인 경우에는 분모가 정확히 일치해야 함!
         const denMatch = qText.match(/분모가\s*(\d+)\s*인/);
         const reqDen = item.requiredDenominator !== undefined
           ? Number(item.requiredDenominator)
@@ -780,19 +843,16 @@ function checkAnswerMatch(userVal, item) {
         const targetIsReduced = (calcGcd(targetN, targetD) === 1);
         const userIsReduced = (calcGcd(userFrac.n, userFrac.den) === 1);
 
-        // 원래 정답이 약분되지 않은 분수(예: 2/4)라면 그 분모(4)를 그대로 써야 정답 인정 ("3/6" 오답 처리)
         if (!targetIsReduced && userFrac.den !== targetD) {
           return false;
         }
 
-        // (B) 기약분수(약분) 요구 여부 판별 ("통분" 예외 제거, "크기가 같은 분수"만 예외 허용)
         const requiresReduced = item.requireReduced !== undefined
           ? Boolean(item.requireReduced)
           : (/기약분수|약분/.test(qText) || (targetIsReduced && !/크기가\s*같은\s*분수/.test(qText)));
 
         if (requiresReduced && !userIsReduced) return false;
 
-        // (C) 대분수 / 가분수 형태 제한 확인
         if ((item.answerForm === 'mixed' || /대분수로/.test(qText)) && targetW > 0 && userFrac.w === 0) return false;
         if ((item.answerForm === 'improper' || /가분수로/.test(qText)) && targetW === 0 && userFrac.w > 0) return false;
         if (userFrac.w > 0 && userFrac.n >= userFrac.den) return false;
@@ -802,7 +862,6 @@ function checkAnswerMatch(userVal, item) {
     }
   }
 
-  // 3) 순수 소수/자연수 수치 동치 확인 (예: 정답 "0.5"에 학생이 "0.50" 입력 시 정답 인정)
   const strippedUser = item.unit ? cleanUser.replace(new RegExp(normalizeMathText(item.unit) + '$'), '') : cleanUser;
   if (/^-?\d+(\.\d+)?$/.test(strippedUser) && /^-?\d+(\.\d+)?$/.test(normTarget)) {
     if (Number(strippedUser) === Number(normTarget)) {
@@ -814,6 +873,7 @@ function checkAnswerMatch(userVal, item) {
 }
 
 function renderInteractivePractice(stageTitle, goalDesc, item, onNextCallback) {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   if (typeof resetAiTutorState === 'function') {
     resetAiTutorState();
   }
@@ -846,6 +906,7 @@ function submitInteractiveChoice(choiceNum) {
 }
 
 function submitInteractiveText() {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   const item = state.currentItem;
   const userVal = readUserAnswerFromDOM(item, 'ans');
   if (!userVal) {
@@ -863,9 +924,9 @@ function handleInteractiveResult(isRight, userVal) {
 
   if (isRight) {
     if (typeof cancelPendingAiRequests === 'function') cancelPendingAiRequests();
-    const cleanExplanation = item.h2
-      ? String(item.h2)
-      : ((typeof cleanHintIntoExplanation === 'function') ? cleanHintIntoExplanation(item.h1 || '', item.ans) : (item.h1 || ''));
+    const cleanExplanation = item.checkTip
+      ? String(item.checkTip)
+      : (item.h2 ? String(item.h2) : ((typeof cleanHintIntoExplanation === 'function') ? cleanHintIntoExplanation(item.h1 || '', item.ans) : (item.h1 || '')));
     fb.className = 'feedback correct';
     fb.innerHTML = `🎉 <b>정답입니다! 참 잘했어요!</b>\n${cleanExplanation ? `💡 <b>풀이 정리:</b> ${cleanExplanation}` : ''}`;
     if (nextBtn) {
@@ -877,7 +938,7 @@ function handleInteractiveResult(isRight, userVal) {
 
   state.usedHelpInLesson = true;
   const rawKey = String(userVal).replace(/[^0-9./-]/g, '');
-  const specificDiag = (item.wrongDiag && (item.wrongDiag[userVal] || item.wrongDiag[rawKey])) || '';
+  const specificDiag = (item.wrongDiag && (item.wrongDiag[userVal] || item.wrongDiag[rawKey])) || item.diagDefault || '';
 
   fb.className = 'feedback hint';
   if (state.attempt === 1) {
@@ -899,13 +960,14 @@ function handleInteractiveResult(isRight, userVal) {
 // 📝 6. 3단계(블라인드 실력 확인 3문항) & 4단계(1:1 쌍둥이 오답 클리닉)
 // -------------------------------------------------------------------------
 function startStep3Blind() {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   if (typeof resetAiTutorState === 'function') resetAiTutorState();
   startStepTimer('step3');
   setHeaderUI(`3단계: 실력 확인 (3문항)`, true, true);
   updateScoreBoard('3단계 실력 확인');
 
-  const poolA = state.lessonData.step3A || [];
-  const poolB = state.lessonData.step4B || [];
+  const poolA = flattenQuestionPool(state.lessonData.step3A);
+  const poolB = flattenQuestionPool(state.lessonData.step4B);
 
   const indices = poolA.length >= 6
     ? [Math.floor(Math.random() * 2), 2 + Math.floor(Math.random() * 2), 4 + Math.floor(Math.random() * 2)]
@@ -920,6 +982,7 @@ function startStep3Blind() {
 }
 
 function renderStep3Question() {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   const idx = state.step3Idx;
   const item = state.step3Questions[idx];
   updateScoreBoard(`3단계 (${idx + 1}/3)`);
@@ -944,7 +1007,7 @@ function buildStep3InputHTML(item) {
   }
   if (isFractionProblem(item)) {
     return `
-      <div class="fraction-widget">
+      <div class="fraction-widget" style="flex-wrap:wrap;">
         <input type="text" id="s3-whole" class="whole-input" placeholder="자연수" autocomplete="off">
         <div class="frac-col">
           <input type="text" id="s3-num" class="frac-input" placeholder="분자" autocomplete="off">
@@ -952,21 +1015,25 @@ function buildStep3InputHTML(item) {
           <input type="text" id="s3-den" class="frac-input" placeholder="분모" autocomplete="off" onkeydown="if(event.key==='Enter') submitStep3Answer()">
         </div>
         ${item.unit ? `<span style="font-size:18px; font-weight:bold;">${item.unit}</span>` : ''}
+        <button type="button" id="s3-mic-btn" onclick="startVoiceForFraction('s3', 's3-mic-btn')" style="padding:10px 14px; border:2px solid #93c5fd; border-radius:10px; background:#eff6ff; color:#1d4ed8; font-size:14px; font-weight:800; cursor:pointer;">🎤 말로 분수 넣기</button>
       </div>
-      <div class="helper-caption">💡 진분수나 가분수는 앞의 [자연수] 칸을 비워 두고 분자와 분모만 입력하세요!</div>
+      <div class="helper-caption">💡 진분수·가분수는 [자연수] 칸을 비워 두세요! (🎤 마이크를 누르고 말해도 입력돼요)</div>
       <button type="button" class="btn" onclick="submitStep3Answer()">답안 제출하기 👉</button>
     `;
   }
+  const ph = item.placeholder ? safeEscapeHtml(item.placeholder) : '정답 입력';
   return `
     <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-      <input type="text" id="s3-input" class="text-input" style="margin-bottom:0;" placeholder="정답 입력" autocomplete="off" onkeydown="if(event.key==='Enter') submitStep3Answer()">
+      <input type="text" id="s3-input" class="text-input" style="margin-bottom:0; flex:1;" placeholder="${ph}" autocomplete="off" onkeydown="if(event.key==='Enter') submitStep3Answer()">
       ${item.unit ? `<span style="font-size:19px; font-weight:bold;">${item.unit}</span>` : ''}
+      <button type="button" id="s3-mic-btn" onclick="startVoiceForInput('s3-input', 's3-mic-btn', 'math')" style="padding:12px 14px; border:2px solid #93c5fd; border-radius:12px; background:#eff6ff; color:#1d4ed8; font-size:15px; font-weight:800; cursor:pointer; white-space:nowrap;">🎤 말하기</button>
     </div>
     <button type="button" class="btn" onclick="submitStep3Answer()">답안 제출하기 👉</button>
   `;
 }
 
 function submitStep3Answer(choiceVal) {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   const item = state.step3Questions[state.step3Idx];
   const userVal = choiceVal !== undefined ? String(choiceVal) : readUserAnswerFromDOM(item, 's3');
   if (!userVal) {
@@ -999,7 +1066,7 @@ function showStep3ResultReport() {
     else state.wrongIndices.push(idx);
 
     const rawKey = String(userVal).replace(/[^0-9./-]/g, '');
-    const diag = (!isRight && item.wrongDiag && (item.wrongDiag[userVal] || item.wrongDiag[rawKey])) || '';
+    const diag = (!isRight && item.wrongDiag && (item.wrongDiag[userVal] || item.wrongDiag[rawKey])) || (!isRight && item.diagDefault) || '';
 
     return `
       <div class="${isRight ? 'report-card' : 'wrong-note-card'}">
@@ -1009,7 +1076,7 @@ function showStep3ResultReport() {
         <div style="font-size:15px; color:#334155; margin-bottom:8px;">${item.q}</div>
         <div>• <b>내가 쓴 답:</b> ${safeEscapeHtml(userVal)}${item.unit || ''} ${!isRight ? `/ <b>바른 정답:</b> <span style="color:#dc2626; font-weight:bold;">${safeEscapeHtml(item.ans)}${item.unit || ''}</span>` : ''}</div>
         ${diag ? `<div style="margin-top:6px; color:#b45309; font-weight:bold;">📌 족집게 오답 진단: ${diag}</div>` : ''}
-        ${!isRight ? `<div style="margin-top:6px; color:#1e3a8a;">💡 <b>차근차근 풀이:</b> ${item.h2 || item.h1 || ''}</div>` : ''}
+        ${!isRight ? `<div style="margin-top:6px; color:#1e3a8a;">💡 <b>차근차근 풀이:</b> ${item.checkTip || item.h2 || item.h1 || ''}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -1049,9 +1116,13 @@ function runNextTwinProblem() {
   const twinItem = state.step4TwinQuestions[origIdx];
   updateScoreBoard(`4단계 보충 (${state.bCursor + 1}/${state.bRetryQueue.length})`);
 
+  const introMsg = state.lessonData.step4Intro
+    ? `💡 <b>핵심 팁:</b> ${state.lessonData.step4Intro}`
+    : `아까 3단계에서 틀렸던 ${origIdx + 1}번 문제와 쌍둥이처럼 닮은 문제예요. 이번엔 내 힘으로 꼭 맞혀 볼까요?`;
+
   renderInteractivePractice(
     `🔄 4단계: ${origIdx + 1}번 쌍둥이 보충 클리닉 (${state.bCursor + 1} / ${state.bRetryQueue.length})`,
-    `아까 3단계에서 틀렸던 ${origIdx + 1}번 문제와 쌍둥이처럼 닮은 문제예요. 이번엔 내 힘으로 꼭 맞혀 볼까요?`,
+    introMsg,
     twinItem,
     () => {
       state.bResults.push('⭕');
@@ -1068,21 +1139,74 @@ function runNextTwinProblem() {
 }
 
 // -------------------------------------------------------------------------
-// 🗣️ 7. 5단계: (5-1) 핵심 원리 빈칸 낱말 퍼즐 ➔ (5-2) 핵심 문장 3회 소리 내어 읽기
+// 🗣️ 7. 5단계: (5-1) 빈칸 퍼즐 또는 양자택일 퀴즈 ➔ (5-2) 핵심 문장 3회 소리 내어 읽기
 // -------------------------------------------------------------------------
 function startStep5WrapUp() {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   if (typeof resetAiTutorState === 'function') resetAiTutorState();
   startStepTimer('step5');
   setHeaderUI(`5단계: 핵심 원리 정리`, true, true);
   updateScoreBoard('5단계 정리');
 
   const les = state.lessonData;
+  const s5a = les.step5A;
   const s5b = les.step5B;
 
   if (s5b && typeof s5b === 'object' && s5b.sentence && Array.isArray(s5b.blankWords) && s5b.blankWords.length > 0) {
     renderStep5BlankPuzzle(s5b);
+    return;
+  }
+
+  if (s5a && typeof s5a === 'object' && s5a.q) {
+    renderStep5ChoiceQuiz(s5a);
+    return;
+  }
+
+  renderStep5ReadAloud();
+}
+
+function renderStep5ChoiceQuiz(s5a) {
+  const qText = String(s5a.q || '');
+  const match = qText.match(/\[\s*\(1\)\s*([^/\]]+?)\s*\/\s*\(2\)\s*([^\]]+?)\s*\]/);
+  const opt1 = match ? match[1].trim() : '1번';
+  const opt2 = match ? match[2].trim() : '2번';
+
+  const content = document.getElementById('app-content');
+  content.innerHTML = `
+    <h2>🧩 5-1단계: 오늘의 핵심 원리 빈칸 퀴즈</h2>
+    <div class="goal-box">
+      <b>💡 핵심 개념 완성:</b> 오늘 배운 핵심 원리 문장의 괄호 안에 들어갈 알맞은 말을 골라 터치해 보세요!
+    </div>
+    <div class="question-box" style="font-size:18px; line-height:1.7;">${qText}</div>
+    <div class="choice-grid">
+      <button type="button" class="choice-btn" style="text-align:center; font-size:18px;" onclick="checkStep5ChoiceQuiz('1', '${safeEscapeHtml(opt1)}')">① (1) ${safeEscapeHtml(opt1)}</button>
+      <button type="button" class="choice-btn" style="text-align:center; font-size:18px;" onclick="checkStep5ChoiceQuiz('2', '${safeEscapeHtml(opt2)}')">② (2) ${safeEscapeHtml(opt2)}</button>
+    </div>
+    <div id="s5-choice-feedback" class="feedback"></div>
+    <button type="button" id="s5-to-read-btn" class="btn" style="display:none; background:#16a34a;" onclick="renderStep5ReadAloud()">🗣️ 마지막 3번 소리 내어 읽기로 가기 👉</button>
+  `;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function checkStep5ChoiceQuiz(chosenNum, chosenWord) {
+  const s5a = state.lessonData.step5A || {};
+  const fb = document.getElementById('s5-choice-feedback');
+  const nextBtn = document.getElementById('s5-to-read-btn');
+  if (!fb) return;
+
+  const isCorrect = (s5a.numAns && String(s5a.numAns) === String(chosenNum)) ||
+                    (s5a.ans && normalizeMathText(s5a.ans) === normalizeMathText(chosenWord));
+
+  if (isCorrect) {
+    fb.className = 'feedback correct';
+    fb.innerHTML = `🎉 <b>정답입니다! [${safeEscapeHtml(s5a.ans || chosenWord)}]이(가) 맞아요!</b>`;
+    if (nextBtn) {
+      nextBtn.style.display = 'block';
+      nextBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   } else {
-    renderStep5ReadAloud();
+    fb.className = 'feedback hint';
+    fb.innerHTML = `${s5a.hint || '💡 아쉬워요! 오늘 배운 핵심 원리를 떠올리며 다른 보기를 골라 보세요.'}`;
   }
 }
 
@@ -1118,13 +1242,17 @@ function renderStep5BlankPuzzle(s5b) {
     </button>
   `).join('');
 
+  const step5AHintText = typeof state.lessonData.step5A === 'string'
+    ? state.lessonData.step5A
+    : (state.lessonData.step5A && state.lessonData.step5A.hint ? state.lessonData.step5A.hint : '');
+
   const content = document.getElementById('app-content');
   content.innerHTML = `
     <h2>🧩 5-1단계: 오늘의 핵심 문장 빈칸 채우기</h2>
     <div class="goal-box">
       <b>💡 핵심 개념 완성:</b> 아래 문장의 <b>( 빈칸 1 ), ( 빈칸 2 )...</b>에 들어갈 알맞은 낱말 카드를 문장 순서대로 터치하여 완성해 보세요!
     </div>
-    ${state.lessonData.step5A ? `<div class="summary-card" style="margin-bottom:14px;">📌 <b>개념 힌트:</b> ${state.lessonData.step5A}</div>` : ''}
+    ${step5AHintText ? `<div class="summary-card" style="margin-bottom:14px;">📌 <b>개념 힌트:</b> ${step5AHintText}</div>` : ''}
     <div class="read-sentence-box" style="background:#eff6ff; border-color:#3b82f6; color:#1e293b;">
       ${displaySentence}
     </div>
@@ -1179,7 +1307,8 @@ function renderStep5ReadAloud() {
   state.readCount = 0;
   state.readLock = false;
   const les = state.lessonData;
-  const sentence = les.readSentence || (les.step5B && les.step5B.sentence) || les.step5A || `${les.title}의 핵심 원리를 완벽히 이해했습니다.`;
+  const step5AText = typeof les.step5A === 'string' ? les.step5A : '';
+  const sentence = les.readSentence || (les.step5B && les.step5B.sentence) || step5AText || `${les.title}의 핵심 원리를 완벽히 이해했습니다.`;
 
   const content = document.getElementById('app-content');
   content.innerHTML = `
@@ -1187,7 +1316,7 @@ function renderStep5ReadAloud() {
     <div class="goal-box">
       <b>💡 메타인지 완성:</b> 눈으로만 본 것은 금방 잊어버려요. 아래 노란 상자의 핵심 문장을 <b>내 귀에 들리도록 또박또박 3번 소리 내어 읽으며</b> 버튼을 차례대로 눌러 주세요!
     </div>
-    ${les.step5A ? `<div class="summary-card" style="margin-bottom:14px;">📌 <b>선생님의 한 줄 요약:</b><br>${les.step5A}</div>` : ''}
+    ${step5AText ? `<div class="summary-card" style="margin-bottom:14px;">📌 <b>선생님의 한 줄 요약:</b><br>${step5AText}</div>` : ''}
     <div class="read-sentence-box">"${sentence}"</div>
     <div class="read-step-list">
       <button type="button" id="read-btn-1" class="read-btn active" onclick="clickReadAloud(1)">🔊 1번째 소리 내어 읽었어요! (터치)</button>
@@ -1338,8 +1467,8 @@ function startUnitExam() {
     const les = unitLessons[code];
     if (!les) return;
     const cleanTitle = String(les.title || '').replace(/^(?:\[\d+-\d+차시\]|\d+-\d+|\d+)\s*(?:차시)?\s*[:.]?\s*/, '');
-    const aList = les.step3A || [];
-    const bList = les.step4B || [];
+    const aList = flattenQuestionPool(les.step3A);
+    const bList = flattenQuestionPool(les.step4B);
     const lessonItems = aList.map((qItem, idx) => ({
       lessonCode: code,
       lessonTitle: cleanTitle,
@@ -1372,6 +1501,7 @@ function startUnitExam() {
 }
 
 function renderExamQuestion() {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   const idx = state.examIdx;
   const total = state.examQuestions.length;
   const cur = state.examQuestions[idx];
@@ -1396,7 +1526,7 @@ function buildExamInputHTML(item) {
   }
   if (isFractionProblem(item)) {
     return `
-      <div class="fraction-widget">
+      <div class="fraction-widget" style="flex-wrap:wrap;">
         <input type="text" id="ex-whole" class="whole-input" placeholder="자연수" autocomplete="off">
         <div class="frac-col">
           <input type="text" id="ex-num" class="frac-input" placeholder="분자" autocomplete="off">
@@ -1404,21 +1534,25 @@ function buildExamInputHTML(item) {
           <input type="text" id="ex-den" class="frac-input" placeholder="분모" autocomplete="off" onkeydown="if(event.key==='Enter') submitExamAnswer()">
         </div>
         ${item.unit ? `<span style="font-size:18px; font-weight:bold;">${item.unit}</span>` : ''}
+        <button type="button" id="ex-mic-btn" onclick="startVoiceForFraction('ex', 'ex-mic-btn')" style="padding:10px 14px; border:2px solid #93c5fd; border-radius:10px; background:#eff6ff; color:#1d4ed8; font-size:14px; font-weight:800; cursor:pointer;">🎤 말로 분수 넣기</button>
       </div>
-      <div class="helper-caption">💡 진분수나 가분수는 앞의 [자연수] 칸을 비워 두고 분자와 분모만 입력하세요!</div>
+      <div class="helper-caption">💡 진분수·가분수는 [자연수] 칸을 비워 두세요! (🎤 마이크를 누르고 말해도 입력돼요)</div>
       <button type="button" class="btn" onclick="submitExamAnswer()">답안 제출 👉</button>
     `;
   }
+  const ph = item.placeholder ? safeEscapeHtml(item.placeholder) : '정답 입력';
   return `
     <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-      <input type="text" id="ex-input" class="text-input" style="margin-bottom:0;" placeholder="정답 입력" autocomplete="off" onkeydown="if(event.key==='Enter') submitExamAnswer()">
+      <input type="text" id="ex-input" class="text-input" style="margin-bottom:0; flex:1;" placeholder="${ph}" autocomplete="off" onkeydown="if(event.key==='Enter') submitExamAnswer()">
       ${item.unit ? `<span style="font-size:19px; font-weight:bold;">${item.unit}</span>` : ''}
+      <button type="button" id="ex-mic-btn" onclick="startVoiceForInput('ex-input', 'ex-mic-btn', 'math')" style="padding:12px 14px; border:2px solid #93c5fd; border-radius:12px; background:#eff6ff; color:#1d4ed8; font-size:15px; font-weight:800; cursor:pointer; white-space:nowrap;">🎤 말하기</button>
     </div>
     <button type="button" class="btn" onclick="submitExamAnswer()">답안 제출 👉</button>
   `;
 }
 
 function submitExamAnswer(choiceVal) {
+  if (typeof stopActiveSpeechRec === 'function') stopActiveSpeechRec();
   const cur = state.examQuestions[state.examIdx];
   const item = cur.qItem;
   const userVal = choiceVal !== undefined ? String(choiceVal) : readUserAnswerFromDOM(item, 'ex');
@@ -1478,7 +1612,7 @@ async function finishUnitExam() {
 
   const wrongHTML = snapWrongList.map(w => {
     const rawKey = String(w.userVal).replace(/[^0-9./-]/g, '');
-    const diag = (w.qItem.wrongDiag && (w.qItem.wrongDiag[w.userVal] || w.qItem.wrongDiag[rawKey])) || '';
+    const diag = (w.qItem.wrongDiag && (w.qItem.wrongDiag[w.userVal] || w.qItem.wrongDiag[rawKey])) || w.qItem.diagDefault || '';
     return `
       <div class="wrong-note-card">
         <div style="font-weight:800; color:#dc2626; margin-bottom:6px;">
@@ -1486,7 +1620,7 @@ async function finishUnitExam() {
         </div>
         <div style="font-size:15px; margin-bottom:6px;">${w.qItem.q}</div>
         ${diag ? `<div style="color:#b45309; font-weight:bold; font-size:14px; margin-bottom:4px;">📌 내가 틀린 까닭: ${diag}</div>` : ''}
-        <div style="color:#1e3a8a; font-size:14px;">💡 <b>해설:</b> ${w.qItem.h2 || w.qItem.h1 || ''}</div>
+        <div style="color:#1e3a8a; font-size:14px;">💡 <b>해설:</b> ${w.qItem.checkTip || w.qItem.h2 || w.qItem.h1 || ''}</div>
       </div>
     `;
   }).join('');
@@ -1556,7 +1690,7 @@ function runNextExamTwin() {
 }
 
 // -------------------------------------------------------------------------
-// 🚀 9. 앱 초기 기동 (로그인 검증을 먼저 통과한 경우에만 API 키를 불러오도록 순서 변경!)
+// 🚀 9. 앱 초기 기동
 // -------------------------------------------------------------------------
 window.addEventListener('DOMContentLoaded', async () => {
   normalizeAllMathData();
