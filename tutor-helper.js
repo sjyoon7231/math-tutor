@@ -1,5 +1,5 @@
 // =========================================================================
-// tutor-helper.js - 클로드 & 챗GPT 2차 심층 검수 100% 완벽 반영 완본
+// tutor-helper.js - 클로드 & 챗GPT 2차 심층 검수 100% 반영 + 🎤 음성 인식 통합 완본
 // =========================================================================
 
 function escapeHtml(s) {
@@ -214,7 +214,10 @@ function renderCurrentSmallStep() {
       "<div class=\x22step-q\x22>" + st.q + "</div>" +
       "<div class=\x22step-input-row\x22>" +
       "<input type=\x22text\x22 id=\x22ss-input-" + idx + "\x22 class=\x22step-mini-input\x22 value=\x22" + (isDone ? escapeHtml(stepAns) : "") + "\x22 " + (isDone ? "disabled" : "") + " placeholder=\x22답 입력\x22 onkeydown=\x22if(event.key===\x27Enter\x27) checkSmallStep(" + idx + ")\x22>" +
-      (isDone ? "<span style=\x22color:#166534; font-weight:bold;\x22>✅ 통과!</span>" : "<button type=\x22button\x22 class=\x22step-mini-btn\x22 onclick=\x22checkSmallStep(" + idx + ")\x22>확인</button>") +
+      (isDone
+        ? "<span style=\x22color:#166534; font-weight:bold;\x22>✅ 통과!</span>"
+        : "<button type=\x22button\x22 id=\x22ss-mic-" + idx + "\x22 onclick=\x22startVoiceForInput(\x27ss-input-" + idx + "\x27, \x27ss-mic-" + idx + "\x27, \x27math\x27)\x22 style=\x22padding:8px 10px; border:2px solid #93c5fd; border-radius:8px; background:#eff6ff; color:#1d4ed8; font-weight:800; cursor:pointer; white-space:nowrap;\x22>🎤 말하기</button>" +
+          "<button type=\x22button\x22 class=\x22step-mini-btn\x22 onclick=\x22checkSmallStep(" + idx + ")\x22>확인</button>") +
       "</div>" +
       "<div id=\x22ss-msg-" + idx + "\x22 class=\x22step-mini-msg\x22></div>" +
       "</div>";
@@ -226,6 +229,7 @@ function renderCurrentSmallStep() {
 }
 
 function checkSmallStep(idx) {
+  if (typeof stopActiveSpeechRec === "function") stopActiveSpeechRec();
   if (idx !== state.smallStepIdx) return;
 
   var st = state.smallSteps[idx];
@@ -291,10 +295,11 @@ function cancelPendingAiRequests() {
   setAiSendButtonDisabled(false);
 }
 
-// ★ 3번 지적 완벽 반영: 새 문제로 넘어갈 때 AI 상태와 진행 중인 비동기 요청을 완전히 초기화!
+// ★ 3번 지적 완벽 반영: 새 문제로 넘어갈 때 AI 상태와 진행 중인 비동기 요청 및 음성 인식을 완전히 초기화!
 function resetAiTutorState() {
   aiRequestSeq++;
   aiIsRequesting = false;
+  if (typeof stopActiveSpeechRec === "function") stopActiveSpeechRec();
   if (typeof state !== "undefined" && state) {
     state.aiChatHistory = [];
     state.activeSmallStepForAI = null;
@@ -343,6 +348,7 @@ function getAiTutorHTML() {
     helperBarHTML +
     "<div class=\x22ai-input-row\x22>" +
     "<input type=\x22text\x22 id=\x22ai-user-input\x22 class=\x22ai-input\x22 placeholder=\x22선생님의 질문에 대답을 적어보세요...\x22 onkeydown=\x22if(event.key===\x27Enter\x27) sendAiUserMessage()\x22>" +
+    "<button type=\x22button\x22 id=\x22ai-mic-btn\x22 onclick=\x22startVoiceForInput(\x27ai-user-input\x27, \x27ai-mic-btn\x27, \x27chat\x27)\x22 style=\x22padding:10px 12px; border:2px solid #93c5fd; border-radius:10px; background:#eff6ff; color:#1d4ed8; font-weight:800; cursor:pointer; white-space:nowrap;\x22>🎤 말하기</button>" +
     "<button type=\x22button\x22 id=\x22ai-send-btn\x22 class=\x22ai-send-btn\x22 onclick=\x22sendAiUserMessage()\x22>대답하기</button>" +
     "</div>" +
     "</div>";
@@ -561,6 +567,7 @@ function renderAiChatLog() {
 }
 
 async function sendAiUserMessage() {
+  if (typeof stopActiveSpeechRec === "function") stopActiveSpeechRec();
   if (aiIsRequesting) return;
 
   var inp = document.getElementById("ai-user-input");
@@ -746,18 +753,49 @@ async function callGeminiSocraticAPI(promptText, historyArr, fallbackHintText) {
 
   return "앗, AI 선생님 연결이 잠시 지연되고 있어요! (" + (lastErrorMsg || "응답 지연") + ") 대신 징검다리 힌트를 드릴게요: " + safeHint;
 }
+
 // =========================================================================
-// 🎤 [추가 모듈] 한국어 수학 음성 인식기 (Web Speech API - 입력 후 수정 가능 방식)
+// 🎤 3. 한국어 수학 음성 인식기 (후보 5개 정밀 스캔 + 소수점 100% 복원 완본)
 // =========================================================================
 let activeSpeechRec = null;
 let activeMicBtnId = null;
 
-// 한글 숫자/수식 발음을 아라비아 숫자와 수학 기호로 똑똑하게 변환
+// 현재 화면에서 풀고 있는 문제의 실제 정답 문자열을 정확히 가져오는 함수
+function getCurrentTargetAnswerForSpeech() {
+  if (typeof state === 'undefined' || !state) return '';
+
+  // 1) 스몰 스텝이 실제로 열려서 진행 중일 때만 스몰 스텝 정답 참조
+  const stepBox = document.getElementById('small-step-box') || document.getElementById('small-step-container');
+  const isStepVisible = stepBox && stepBox.style.display !== 'none';
+  if (isStepVisible && Array.isArray(state.smallSteps) && state.smallSteps.length > 0 && state.smallSteps[state.smallStepIdx]) {
+    const st = state.smallSteps[state.smallStepIdx];
+    return String(st.ans ?? st.a ?? '').trim();
+  }
+
+  // 2) 1·2·4단계 일반 문제 풀이 중일 때
+  if (state.currentItem && (document.getElementById('ans-input') || document.getElementById('ans-num'))) {
+    return String(state.currentItem.ans ?? state.currentItem.a ?? '').trim();
+  }
+
+  // 3) 3단계 블라인드 테스트 중일 때
+  if (Array.isArray(state.step3Questions) && state.step3Questions[state.step3Idx] && (document.getElementById('s3-input') || document.getElementById('s3-num'))) {
+    const q3 = state.step3Questions[state.step3Idx];
+    return String(q3.ans ?? q3.a ?? '').trim();
+  }
+
+  // 4) 단원평가 모의고사 중일 때
+  if (Array.isArray(state.examQuestions) && state.examQuestions[state.examIdx] && (document.getElementById('ex-input') || document.getElementById('ex-num'))) {
+    const qEx = state.examQuestions[state.examIdx].qItem;
+    return String(qEx?.ans ?? qEx?.a ?? '').trim();
+  }
+
+  return '';
+}
+
 function parseKoreanMathSpeech(rawText, mode = 'math') {
   if (!rawText) return '';
   let s = String(rawText).trim();
 
-  // AI 채팅 모드일 때는 문장 흐름을 살리고 연산 기호만 보기 좋게 보정
   if (mode === 'chat') {
     return s
       .replace(/곱하기/g, '×')
@@ -767,15 +805,16 @@ function parseKoreanMathSpeech(rawText, mode = 'math') {
       .replace(/네모/g, '□');
   }
 
-  // 기본 기호 및 소수점 변환
+  // 1) 기본 기호 및 영어/특수 소수점 표현 변환
   s = s.replace(/마이너스\s*|음수\s*/g, '-');
   s = s.replace(/플러스\s*/g, '+');
   s = s.replace(/곱하기/g, '×').replace(/나누기/g, '÷').replace(/더하기/g, '+').replace(/빼기/g, '-');
   s = s.replace(/네모|빈칸/g, '□');
-  s = s.replace(/(\d+)\s*점\s*(\d+)/g, '$1.$2');
-  s = s.replace(/영점\s*(\d+)/g, '0.$1').replace(/공점\s*(\d+)/g, '0.$1');
+  // 음성인식기가 '점'을 '좀', '쯤', '전', '정', '포인트', 'point', ',' 등으로 잘못 들었을 때도 소수점으로 처리!
+  s = s.replace(/포인트|point/gi, '점');
+  s = s.replace(/(\d+)\s*,\s*(\d+)/g, '$1.$2');
 
-  // 자주 쓰는 고유어 숫자 변환 (한 개, 두 개 ... 스물 등)
+  // 2) 고유어 숫자 변환
   const nativeMap = {
     '스물': '20', '열아홉': '19', '열여덟': '18', '열일곱': '17', '열여섯': '16',
     '열다섯': '15', '열네': '14', '열넷': '14', '열세': '13', '열셋': '13',
@@ -790,12 +829,15 @@ function parseKoreanMathSpeech(rawText, mode = 'math') {
     }
   });
 
-  // 한자어 숫자 변환 (예: "이십사" -> 24, "삼분의 이" -> "3분의 2")
-  function korWordToNumStr(text) {
-    const digits = { '영':0, '공':0, '일':1, '이':2, '삼':3, '사':4, '오':5, '육':6, '륙':6, '칠':7, '팔':8, '구':9 };
-    const units = { '십':10, '백':100, '천':1000 };
-    return text.replace(/[영공일이삼사오육륙칠팔구십백천]+/g, (match) => {
-      if (match.length === 1 && units[match]) return String(units[match]);
+  // 한자어 숫자 변환 도우미
+  const digits = { '영':0, '공':0, '일':1, '이':2, '삼':3, '사':4, '오':5, '육':6, '륙':6, '칠':7, '팔':8, '구':9 };
+  const units = { '십':10, '백':100, '천':1000, '만':10000 };
+
+  function korIntToNumStr(text) {
+    return text.replace(/[영공일이삼사오육륙칠팔구십백천만]+/g, (match) => {
+      if (!/[십백천만]/.test(match)) {
+        return Array.from(match).map(ch => digits[ch]).join('');
+      }
       let total = 0;
       let current = 0;
       for (let ch of match) {
@@ -811,9 +853,22 @@ function parseKoreanMathSpeech(rawText, mode = 'math') {
     });
   }
 
-  s = korWordToNumStr(s);
+  // 3) 소수점("점", "쩜", "좀") 기준 분리 후 앞뒤 숫자를 각각 변환!
+  const decRegex = /([0-9영공일이삼사오육륙칠팔구십백천만]+)\s*[점쩜좀.]\s*([0-9영공일이삼사오육륙칠팔구\s]+)/;
+  if (decRegex.test(s)) {
+    s = s.replace(decRegex, (_, intPart, decPart) => {
+      const cleanInt = korIntToNumStr(intPart.replace(/\s+/g, ''));
+      const cleanDec = decPart.replace(/\s+/g, '').replace(/[영공일이삼사오육륙칠팔구]/g, ch => digits[ch]);
+      return `${cleanInt}.${cleanDec}`;
+    });
+  } else {
+    s = korIntToNumStr(s);
+  }
 
-  // "3분의 2" -> "2/3", "1과 4분의 3" -> "1과 3/4" 변환
+  // 4) 숫자 사이에 남은 "점/쩜/좀/공백"을 "."으로 결합 ("36 점 8" 또는 "36 8" -> "36.8")
+  s = s.replace(/(\d+)\s*[점쩜좀.]\s*(\d+)/g, '$1.$2');
+
+  // 5) 분수 발음 변환 ("3분의 2" -> "2/3", "1과 4분의 3" -> "1과 3/4")
   const mixedMatch = s.match(/(\d+)\s*[과와]\s*(\d+)\s*분의\s*(\d+)/);
   if (mixedMatch) {
     return `${mixedMatch[1]}과 ${mixedMatch[3]}/${mixedMatch[2]}`;
@@ -823,9 +878,50 @@ function parseKoreanMathSpeech(rawText, mode = 'math') {
     return `${fracMatch[2]}/${fracMatch[1]}`;
   }
 
-  // 끝에 붙은 불필요한 조사나 마침표 제거
-  s = s.replace(/입니다|이에요|예요|[.?~]/g, '').trim();
+  s = s.replace(/입니다|이에요|예요|[?~]/g, '').replace(/\.$/, '').trim();
+
+  // 6) ★ 만약 크롬이 "36 8"(띄어쓰기)로 줬거나 아예 "368"로 붙여서 줬을 때의 스마트 소수점 복원!
+  const refAns = getCurrentTargetAnswerForSpeech();
+
+  // (A) "36 8"처럼 숫자 사이에 공백이 있고 소수 문제인 경우 "36.8"로 변환
+  if (/^\d+\s+\d+$/.test(s) && refAns.includes('.')) {
+    s = s.replace(/\s+/, '.');
+  }
+
+  // (B) "368"처럼 점 없이 붙어 나왔는데, 현재 문제의 정답(예: "36.8")에서 점을 뺀 숫자("368")와 일치하면 소수점 자동 삽입!
+  const digitsOnly = s.replace(/\s+/g, '');
+  if (/^\d{2,}$/.test(digitsOnly) && refAns.includes('.')) {
+    if (refAns.replace('.', '') === digitsOnly) {
+      return refAns;
+    }
+    // 오답을 말했더라도 현재 문제 정답이 소수(예: 소수 한 자리)이고 화면 질문에 '소수'가 있으면 같은 자릿수에 소수점 찍어주기
+    const decPlaces = (refAns.split('.')[1] || '').length;
+    if (decPlaces > 0 && digitsOnly.length > decPlaces && digitsOnly.length === refAns.replace('.', '').length) {
+      const cutPos = digitsOnly.length - decPlaces;
+      return digitsOnly.slice(0, cutPos) + '.' + digitsOnly.slice(cutPos);
+    }
+  }
+
   return s;
+}
+
+// 크롬이 반환한 최대 5개의 음성인식 후보 중에서 소수점('.', '점', '쩜')이나 분수('분의') 표현이 살아있는 후보를 최우선 선택!
+function pickBestMathTranscript(resultItem, mode) {
+  if (!resultItem || !resultItem.length) return '';
+  const candidates = [];
+  for (let i = 0; i < resultItem.length; i++) {
+    if (resultItem[i] && resultItem[i].transcript) {
+      candidates.push(String(resultItem[i].transcript).trim());
+    }
+  }
+  console.log('🎤 [음성인식 후보 목록]:', candidates);
+
+  if (mode === 'math') {
+    // 후보 중에 '.', '점', '쩜', '분의'가 명시적으로 들어있는 후보가 있다면 그 후보를 1순위로 선택!
+    const mathCandidate = candidates.find(c => /[점쩜.\/]|분의|포인트/.test(c));
+    if (mathCandidate) return mathCandidate;
+  }
+  return candidates[0] || '';
 }
 
 function stopActiveSpeechRec() {
@@ -845,7 +941,6 @@ function stopActiveSpeechRec() {
   }
 }
 
-// 1) 일반 입력칸 및 AI 채팅창 음성 입력
 function startVoiceForInput(inputId, btnId, mode = 'math') {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -866,7 +961,7 @@ function startVoiceForInput(inputId, btnId, mode = 'math') {
   const rec = new SpeechRecognition();
   rec.lang = 'ko-KR';
   rec.interimResults = false;
-  rec.maxAlternatives = 1;
+  rec.maxAlternatives = 5; // ★ 5개 후보를 모두 받아와서 '점'이 살아있는 후보를 찾아냄!
 
   activeSpeechRec = rec;
   activeMicBtnId = btnId;
@@ -880,15 +975,15 @@ function startVoiceForInput(inputId, btnId, mode = 'math') {
   }
 
   rec.onresult = (event) => {
-    const rawTranscript = event.results[0][0].transcript || '';
-    const converted = parseKoreanMathSpeech(rawTranscript, mode);
+    const bestRaw = pickBestMathTranscript(event.results[0], mode);
+    const converted = parseKoreanMathSpeech(bestRaw, mode);
     inp.value = converted;
-    inp.focus(); // 학생이 눈으로 보고 바로 수정하거나 엔터를 칠 수 있도록 포커스 이동!
+    inp.focus();
   };
 
   rec.onerror = (event) => {
     if (event.error === 'not-allowed') {
-      alert("🎤 마이크 권한이 꺼져 있습니다. 주소창 왼쪽의 자물쇠(설정) 아이콘을 눌러 마이크를 [허용]해 주세요!");
+      alert("🎤 마이크 권한이 꺼져 있습니다. 주소창 왼쪽의 설정 아이콘을 눌러 마이크를 [허용]해 주세요!");
     }
     stopActiveSpeechRec();
   };
@@ -904,7 +999,6 @@ function startVoiceForInput(inputId, btnId, mode = 'math') {
   }
 }
 
-// 2) 분수 위젯(자연수·분자·분모 3칸) 전용 음성 입력 ("일과 사분의 삼" -> 자연수:1, 분자:3, 분모:4 자동 분배!)
 function startVoiceForFraction(prefix, btnId) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -922,7 +1016,7 @@ function startVoiceForFraction(prefix, btnId) {
   const rec = new SpeechRecognition();
   rec.lang = 'ko-KR';
   rec.interimResults = false;
-  rec.maxAlternatives = 1;
+  rec.maxAlternatives = 5;
 
   activeSpeechRec = rec;
   activeMicBtnId = btnId;
@@ -936,8 +1030,8 @@ function startVoiceForFraction(prefix, btnId) {
   }
 
   rec.onresult = (event) => {
-    const rawTranscript = event.results[0][0].transcript || '';
-    const converted = parseKoreanMathSpeech(rawTranscript, 'math');
+    const bestRaw = pickBestMathTranscript(event.results[0], 'math');
+    const converted = parseKoreanMathSpeech(bestRaw, 'math');
 
     const wEl = document.getElementById(`${prefix}-whole`);
     const nEl = document.getElementById(`${prefix}-num`);
@@ -955,7 +1049,6 @@ function startVoiceForFraction(prefix, btnId) {
       if (nEl) nEl.value = simple[1];
       if (dEl) { dEl.value = simple[2]; dEl.focus(); }
     } else {
-      // 숫자를 그냥 말한 경우(예: "3 과 4") 분자 칸에 우선 넣어 수정할 수 있게 함
       const nums = converted.match(/\d+/g);
       if (nums && nums.length === 3) {
         if (wEl) wEl.value = nums[0];
@@ -981,38 +1074,3 @@ function startVoiceForFraction(prefix, btnId) {
     stopActiveSpeechRec();
   }
 }
-
-// 3) tutor-helper.js의 스몰 스텝 입력칸 & 소크라테스 AI 채팅 입력칸에도 [🎤] 버튼 자동 부착!
-(function attachVoiceButtonsToTutorHelper() {
-  if (typeof window.getAiTutorHTML === 'function') {
-    const origGetAiTutorHTML = window.getAiTutorHTML;
-    window.getAiTutorHTML = function() {
-      const html = origGetAiTutorHTML();
-      return html.replace(
-        '<button type="button" id="ai-send-btn"',
-        '<button type="button" id="ai-mic-btn" onclick="startVoiceForInput(\x27ai-user-input\x27, \x27ai-mic-btn\x27, \x27chat\x27)" style="padding:10px 12px; border:2px solid #93c5fd; border-radius:10px; background:#eff6ff; color:#1d4ed8; font-weight:800; cursor:pointer; white-space:nowrap;">🎤 말하기</button><button type="button" id="ai-send-btn"'
-      );
-    };
-  }
-
-  if (typeof window.renderSmallSteps === 'function') {
-    const origRenderSmallSteps = window.renderSmallSteps;
-    window.renderSmallSteps = function() {
-      origRenderSmallSteps();
-      const idx = state.smallStepIdx;
-      const stepInp = document.getElementById(`step-inp-${idx}`);
-      if (stepInp && stepInp.parentElement && !document.getElementById(`step-mic-${idx}`)) {
-        const micBtn = document.createElement('button');
-        micBtn.type = 'button';
-        micBtn.id = `step-mic-${idx}`;
-        micBtn.innerText = '🎤';
-        micBtn.title = '말로 입력하기';
-        micBtn.style.cssText = 'padding:10px 12px; border:2px solid #93c5fd; border-radius:8px; background:#eff6ff; color:#1d4ed8; font-weight:800; cursor:pointer; flex-shrink:0;';
-        micBtn.onclick = function() {
-          startVoiceForInput(`step-inp-${idx}`, `step-mic-${idx}`, 'math');
-        };
-        stepInp.parentElement.insertBefore(micBtn, stepInp.nextSibling);
-      }
-    };
-  }
-})();
