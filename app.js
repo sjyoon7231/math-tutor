@@ -1,40 +1,40 @@
 // =========================================================================
-// 🚀 app.js - 초등 수학 AI 자기주도 완전학습 메인 엔진 (전체 기능 100% 복원 완본)
+// 🚀 app.js - 초등 수학 AI 자기주도 완전학습 메인 엔진 (5·6학년 모든 구조 100% 호환 완본)
 // =========================================================================
 
 // -------------------------------------------------------------------------
-// 1. 5학년(배열/a/options) & 6학년(객체/ans/choices) 데이터 자동 호환 어댑터
+// 1. 5학년 & 6학년 모든 단원 데이터 구조 자동 해독 및 표준화 어댑터
 // -------------------------------------------------------------------------
 function normalizeQuestionItem(item) {
   if (!item || typeof item !== 'object') return item;
 
   // 객관식 보기 통일: options(0부터 시작) -> choices(1부터 시작하는 문자열)
-  if (Array.isArray(item.options) && !item.choices) {
-    item.choices = item.options.map((opt, idx) => {
-      const clean = String(opt).replace(/^\d+번:\s*/, '');
+  const rawOpts = item.choices || item.options;
+  if (Array.isArray(rawOpts) && rawOpts.length > 0) {
+    const isZeroIndexed = !item.choices && Array.isArray(item.options);
+    item.choices = rawOpts.map((opt, idx) => {
+      const clean = String(opt).replace(/^\d+번\s*[:.]?\s*/, '');
       return `${idx + 1}번: ${clean}`;
     });
-    if (typeof item.ans === 'number') {
-      item.ans = String(item.ans + 1);
-    } else if (item.a !== undefined && item.ans === undefined) {
-      item.ans = String(Number(item.a) + 1);
+    if (isZeroIndexed) {
+      if (typeof item.ans === 'number') {
+        item.ans = String(item.ans + 1);
+      } else if (item.a !== undefined && item.ans === undefined && !isNaN(Number(item.a))) {
+        item.ans = String(Number(item.a) + 1);
+      }
     }
-  } else if (Array.isArray(item.choices)) {
-    item.choices = item.choices.map((opt, idx) => {
-      const str = String(opt);
-      return /^\d+번/.test(str) ? str : `${idx + 1}번: ${str}`;
-    });
   }
 
-  // 주관식 정답 통일: a <-> ans
-  if (item.a !== undefined && item.ans === undefined) {
-    item.ans = String(item.a);
+  // 주관식 정답 키 통일: a <-> ans <-> answer
+  if (item.ans === undefined) {
+    if (item.a !== undefined) item.ans = String(item.a);
+    else if (item.answer !== undefined) item.ans = String(item.answer);
   }
-  if (item.ans !== undefined && item.a === undefined) {
+  if (item.a === undefined && item.ans !== undefined) {
     item.a = String(item.ans);
   }
 
-  // 분수 정답(num/den)이 있는데 ans가 없는 경우 자동 생성
+  // 분수 정답(num/den)이 있는데 ans 문자열이 없는 경우 자동 생성
   if (item.num !== undefined && item.den !== undefined && !item.ans) {
     item.ans = item.whole ? `${item.whole}과 ${item.num}/${item.den}` : `${item.num}/${item.den}`;
     item.a = item.ans;
@@ -43,16 +43,27 @@ function normalizeQuestionItem(item) {
   // 스몰스텝(steps) 내부 정답 키 통일
   if (Array.isArray(item.steps)) {
     item.steps.forEach(st => {
-      if (st.a !== undefined && st.ans === undefined) st.ans = String(st.a);
-      if (st.ans !== undefined && st.a === undefined) st.a = String(st.ans);
+      if (st.ans === undefined && st.a !== undefined) st.ans = String(st.a);
+      if (st.a === undefined && st.ans !== undefined) st.a = String(st.ans);
     });
   }
 
   return item;
 }
 
-function normalizeLessonObj(les) {
+function normalizeLessonObj(les, fallbackCode) {
   if (!les || typeof les !== 'object') return les;
+
+  if (!les.id && fallbackCode) les.id = fallbackCode;
+  if (!les.title && les.name) les.title = les.name;
+
+  // 6학년 초기 버전 키 이름 호환 (step1 -> step1Quiz, step2 -> step2_1 등)
+  if (!les.step1Quiz && les.quiz) les.step1Quiz = les.quiz;
+  if (!les.step1Quiz && les.step1) les.step1Quiz = les.step1;
+  if (!les.step2_1 && les.step2A) les.step2_1 = les.step2A;
+  if (!les.step2_2 && les.step2B) les.step2_2 = les.step2B;
+  if (!les.step3A && les.step3) les.step3A = les.step3;
+  if (!les.step4B && les.step4) les.step4B = les.step4;
 
   const listKeys = ['warmup', 'step1Quiz', 'step2_1', 'step2_2', 'step3A', 'step4B'];
   listKeys.forEach(k => {
@@ -60,6 +71,7 @@ function normalizeLessonObj(les) {
       les[k].forEach(normalizeQuestionItem);
     } else if (les[k] && typeof les[k] === 'object') {
       normalizeQuestionItem(les[k]);
+      les[k] = [les[k]];
     }
   });
 
@@ -75,29 +87,87 @@ function normalizeLessonObj(les) {
   return les;
 }
 
+// 차시 객체인지 판별하는 도우미
+function isLikelyLessonObject(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  return Boolean(
+    obj.title || obj.name || obj.videoUrl !== undefined ||
+    obj.summaryCard || obj.step1Quiz || obj.step2_1 || obj.step3A
+  );
+}
+
 function normalizeAllMathData() {
   window.MATH_DB = window.MATH_DB || { grades: [], semesters: {}, units: {}, lessons: {} };
   const lessons = window.MATH_DB.lessons || {};
 
   Object.keys(lessons).forEach(unitKey => {
-    const rawUnit = lessons[unitKey];
-    // 5학년 데이터처럼 배열([ {id: "6-1", ...}, ... ]) 형태인 경우 -> lessonOrder가 있는 객체로 자동 변환
+    let rawUnit = lessons[unitKey];
+    if (!rawUnit) return;
+
+    const unitNum = unitKey.split('-')[2] || '1';
+
+    // 1) 만약 { title: "...", lessons: { ... } } 또는 { data: [ ... ] } 처럼 한 겹 더 감싸져 있다면 껍질 벗기기!
+    if (!Array.isArray(rawUnit) && typeof rawUnit === 'object') {
+      if (rawUnit.lessons && typeof rawUnit.lessons === 'object') {
+        rawUnit = rawUnit.lessons;
+      } else if (Array.isArray(rawUnit.items)) {
+        rawUnit = rawUnit.items;
+      } else if (Array.isArray(rawUnit.list)) {
+        rawUnit = rawUnit.list;
+      }
+    }
+
+    // 2) 배열([ {id: "1-1", ...}, ... ]) 형태인 경우 -> lessonOrder가 있는 표준 객체로 변환
     if (Array.isArray(rawUnit)) {
       const converted = { lessonOrder: [] };
       rawUnit.forEach((les, idx) => {
-        if (!les) return;
-        const code = les.id || `${unitKey.split('-')[2] || '1'}-${idx + 1}`;
+        if (!les || typeof les !== 'object') return;
+        const code = String(les.id || les.code || `${unitNum}-${idx + 1}`);
         converted.lessonOrder.push(code);
-        converted[code] = normalizeLessonObj(les);
+        converted[code] = normalizeLessonObj(les, code);
       });
       lessons[unitKey] = converted;
-    } else if (rawUnit && typeof rawUnit === 'object') {
-      if (!Array.isArray(rawUnit.lessonOrder)) {
-        rawUnit.lessonOrder = Object.keys(rawUnit).filter(k => k !== 'lessonOrder');
+      return;
+    }
+
+    // 3) 객체({ "1-1": {...}, "1-2": {...} }) 형태인 경우
+    if (typeof rawUnit === 'object') {
+      const metaKeys = ['lessonOrder', 'title', 'name', 'desc', 'description', 'unit', 'grade', 'semester', 'unitId', 'unitNum', 'subtitle', 'lessonTitles'];
+      const validCodes = [];
+
+      // 기존 lessonOrder가 있더라도 실제 차시 객체가 들어 있는지 검증
+      if (Array.isArray(rawUnit.lessonOrder)) {
+        rawUnit.lessonOrder.forEach(c => {
+          if (rawUnit[c] && isLikelyLessonObject(rawUnit[c])) {
+            validCodes.push(String(c));
+          }
+        });
       }
-      rawUnit.lessonOrder.forEach(code => {
-        if (rawUnit[code]) normalizeLessonObj(rawUnit[code]);
+
+      // 만약 validCodes가 비어 있다면 객체의 모든 키를 뒤져서 진짜 차시 데이터만 추출!
+      if (validCodes.length === 0) {
+        Object.keys(rawUnit).forEach(k => {
+          if (metaKeys.includes(k)) return;
+          const val = rawUnit[k];
+          if (isLikelyLessonObject(val)) {
+            validCodes.push(String(k));
+          } else if (val && typeof val === 'object' && !Array.isArray(val)) {
+            // 혹시 한 단계 더 깊이 들어있는 경우
+            Object.keys(val).forEach(subK => {
+              if (isLikelyLessonObject(val[subK])) {
+                rawUnit[subK] = val[subK];
+                validCodes.push(String(subK));
+              }
+            });
+          }
+        });
+      }
+
+      rawUnit.lessonOrder = validCodes;
+      validCodes.forEach(code => {
+        rawUnit[code] = normalizeLessonObj(rawUnit[code], code);
       });
+      lessons[unitKey] = rawUnit;
     }
   });
 }
@@ -140,7 +210,6 @@ function updateScoreBoard(text) {
   if (sb) sb.innerText = text;
 }
 
-// API 키 설정 모달 제어 (study.html 내장 모달 연동)
 function openApiModal() {
   const modal = document.getElementById('api-modal');
   const inp = document.getElementById('api-key-input');
@@ -308,7 +377,9 @@ function showLessonSelect(grade, semester, unit) {
   updateScoreBoard('차시 선택');
 
   const records = (getStudyRecords()[state.unitKey]) || {};
-  const order = unitLessons.lessonOrder || Object.keys(unitLessons).filter(k => k !== 'lessonOrder');
+  const order = (Array.isArray(unitLessons.lessonOrder) && unitLessons.lessonOrder.length > 0)
+    ? unitLessons.lessonOrder
+    : Object.keys(unitLessons).filter(k => k !== 'lessonOrder' && isLikelyLessonObject(unitLessons[k]));
 
   const itemsHTML = order.map((code, idx) => {
     const les = unitLessons[code];
@@ -323,10 +394,12 @@ function showLessonSelect(grade, semester, unit) {
       badgeHTML = `<span class="review-badge">🔄 복습 권장 (${rec.score || 0}점)</span>`;
     }
 
+    const cleanTitle = String(les.title || `${code}차시`).replace(/^\d+-\d+\.?\s*/, '');
+
     return `
       <button type="button" class="menu-item" onclick="startLesson('${code}')">
         <div>
-          <div class="menu-title">${isMasterLesson ? '👑' : '✏️'} [${code}차시] ${les.title}</div>
+          <div class="menu-title">${isMasterLesson ? '👑' : '✏️'} [${code}차시] ${cleanTitle}</div>
           <div class="menu-desc">${isMasterLesson ? '단원 전체 핵심 요약 카드 & 고난도 응용 총정리' : '1분 개념 영상 ➔ 함께·혼자 풀기 ➔ 3문항 실력 확인 ➔ 쌍둥이 클리닉'}</div>
         </div>
         ${badgeHTML}
@@ -429,7 +502,7 @@ function showStep1Concept() {
 
   const rulesHTML = Array.isArray(sc.rules)
     ? sc.rules.map(r => `<div style="margin-bottom:6px; font-weight:bold; color:#1e293b;">${r}</div>`).join('')
-    : '';
+    : (sc.content ? `<div style="font-weight:bold; color:#1e293b;">${sc.content}</div>` : '');
 
   const cardHTML = (sc.title || sc.svg || rulesHTML) ? `
     <div class="summary-card">
@@ -650,7 +723,6 @@ function handleInteractiveResult(isRight, userVal) {
     return;
   }
 
-  // 오답 진단 메시지 확인
   const rawKey = String(userVal).replace(/[^0-9./-]/g, '');
   const specificDiag = (item.wrongDiag && (item.wrongDiag[userVal] || item.wrongDiag[rawKey])) || '';
 
@@ -681,7 +753,6 @@ function startStep3Blind() {
   const poolA = state.lessonData.step3A || [];
   const poolB = state.lessonData.step4B || [];
 
-  // 3A(6문항: 유형1 2개, 유형2 2개, 유형3 2개)와 4B에서 정확히 같은 인덱스로 3쌍 추출
   const indices = poolA.length >= 6
     ? [Math.floor(Math.random() * 2), 2 + Math.floor(Math.random() * 2), 4 + Math.floor(Math.random() * 2)]
     : [0, 1, 2].filter(i => i < poolA.length);
@@ -848,7 +919,6 @@ function startStep5WrapUp() {
   const les = state.lessonData;
   const s5b = les.step5B;
 
-  // step5B에 빈칸 채우기 객체(sentence, blankWords, distractors)가 있으면 빈칸 퍼즐 먼저 진행!
   if (s5b && typeof s5b === 'object' && s5b.sentence && Array.isArray(s5b.blankWords) && s5b.blankWords.length > 0) {
     renderStep5BlankPuzzle(s5b);
   } else {
@@ -1058,7 +1128,7 @@ function startUnitExam() {
   const unitLessons = MATH_DB.lessons[state.unitKey];
   if (!unitLessons) return;
 
-  const order = unitLessons.lessonOrder || Object.keys(unitLessons).filter(k => k !== 'lessonOrder');
+  const order = unitLessons.lessonOrder || Object.keys(unitLessons).filter(k => k !== 'lessonOrder' && isLikelyLessonObject(unitLessons[k]));
   let pool = [];
 
   order.forEach(code => {
@@ -1076,7 +1146,11 @@ function startUnitExam() {
     });
   });
 
-  // 차시별로 골고루 섞어서 10문항 추출
+  if (pool.length === 0) {
+    alert("단원평가 문항을 불러올 수 없습니다.");
+    return;
+  }
+
   pool.sort(() => Math.random() - 0.5);
   state.examQuestions = pool.slice(0, 10);
   state.examIdx = 0;
